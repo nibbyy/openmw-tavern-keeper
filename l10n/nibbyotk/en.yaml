@@ -1,0 +1,32 @@
+otk_mod_name: OpenMW Tavern Keeper
+otk_mod_description: |
+ Version 0.2
+ Created by nibby
+ 
+otk_mod_version: Version 0.2b
+
+error_text: (OTK - ERROR) Report this to nibby (developer) - 
+warn_text: (OTK - WARNING) - 
+
+tavern_settings_hotkey: Tavern Menu Hotkey
+tavern_settings_hotkey_default: Hotkey - 
+tavern_settings_hotkey_incorrect: Escape Key can not be used for Tavern Menu!
+tavern_settings_hotkey_description: Hotkey for opening the Tavern Menu
+tavern_settings_name: Tavern Menu Settings
+tavern_settings_description: Settings for the Tavern Menu
+tavern_settings_no_key_set: No Key Set
+
+tavern_menu_title: OpenMW Tavern Keeper
+
+color_normal: fontColor_color_normal
+color_normal_over: fontColor_color_normal_over
+color_normal_pressed: fontColor_color_normal_pressed
+color_active: fontColor_color_active
+color_active_over: fontColor_color_active_over
+color_active_pressed: fontColor_color_active_pressed
+color_disabled: fontColor_color_disabled
+color_disabled_over: fontColor_color_disabled_over
+color_disabled_pressed: fontColor_color_disabled_pressed
+
+fonts_pelagiad: fonts_Font_0
+fonts_ayembedt: fonts_Font_2

@@ -1,0 +1,4 @@
+MENU: scripts/nibby/otk/config/OTKConfigPages.lua
+MENU: scripts/nibby/otk/config/OTKConfigHotkey.lua
+
+PLAYER: scripts/nibby/otk/menu/OTKTavernMenu.lua

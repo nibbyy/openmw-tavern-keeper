@@ -1,0 +1,468 @@
+local input = require('openmw.input')
+local core = require('openmw.core')
+local async = require('openmw.async')
+local ui = require('openmw.ui')
+local util = require('openmw.util')
+local interfaces = require('openmw.interfaces')
+local self = require('openmw.self')
+local constants = require('scripts.omw.mwui.constants')
+
+local modLocale = core.l10n('nibbyotk', 'en')
+local v2 = util.vector2
+local MWUI = interfaces.MWUI
+
+local pageHandler = require('scripts.nibby.otk.menu.OTKPageHandler')
+local splashList = require('scripts.nibby.otk.menu.OTKSubtitleSplashes')
+
+local morrowindGold = util.color.rgb(0.792157, 0.647059, 0.376471)
+local morrowindLight = util.color.rgb(0.87451, 0.788235, 0.623529)
+local colorBlack = util.color.rgb(0, 0, 0)
+local whiteTexture = constants.whiteTexture
+
+-- UI Variable storage
+local rootContainer -- Declared early for 'if' statement checks
+local subtitleText -- Declare early for random changing in openMenu()
+local onFrameFunctions = {} -- Used for button functions to call onFrame
+
+-- Helper function which returns True if the menu's Root element is open
+local function isRootVisible()
+    return rootContainer and rootContainer.layout.props.visible ~= false
+end
+
+-- Function called to close the menu
+local function closeMenu()
+    if not isRootVisible() then return end
+
+    interfaces.UI.setMode() -- Re-locks the mouse
+
+    print('[OTK] OTKTavernMenu: Closing the Tavern Menu')
+    rootContainer.layout.props.visible = false -- Closes the menu
+    rootContainer:update()
+end
+
+-- Function used for exit button mouse logic
+local function exitButtonLogic(elem, texturePath, shouldClose)
+    elem.layout.props.resource = ui.texture{ path = texturePath }
+    elem:update()
+    if shouldClose then
+        closeMenu()
+    end
+end
+
+-- Called by other scripts to add functions to onFrameFunctions
+local function addOnFrameFunction(key, func)
+    if type(key) ~= 'string' then return end
+    if type(func) ~= 'function' then return end
+    onFrameFunctions[key] = func
+end
+
+-- Called onLoad to construct the menu
+local function buildMenu()
+    print('[OTK] OTKTavernMenu: Building the Tavern Menu!')
+
+    -- Variables used to scale assets by screen size
+    local screenSize = ui.screenSize()
+    local screenScale = math.min(screenSize.x / 1920, screenSize.y / 1080) -- Should be applied to all pixel-based sized elements
+
+    -- Lets us easily add spacing to elements ui.content{} for spacing
+    local paddingSpacer = { props = { size = (v2(5, 5) * screenScale) } }
+
+    -- Root element, from which the entire UI is built. We also use it for 'if' statements
+    rootContainer = ui.create {
+        name = 'rootContainer',
+        type = ui.TYPE.Container,
+        layer = 'Windows',
+        template = MWUI.templates.boxTransparentThick, -- Thick Borders with transparent background
+        props = {
+            visible = false,
+            anchor = v2(0.5, 0.5), -- Element anchors on its own center instead of top-left corner
+            relativePosition = v2(0.5, 0.5), -- Element is positioned at center of screen
+        },
+        content = ui.content {},
+    }
+    rootContainer.layout.content:add(paddingSpacer)
+
+    -- Root Flex Widget, which will allow the UI to grow easily
+    local rootVerticalFlex = ui.create {
+        name = 'rootVerticalFlex',
+        type = ui.TYPE.Flex,
+        props = {
+            horizontal = false, -- Grows vertically
+        },
+        content = ui.content {},
+    }
+    rootContainer.layout.content:add(rootVerticalFlex)
+
+    -- Top Bar to hold our Back, Forward and Exit buttons
+    local topBarWidget = ui.create {
+        name = 'topBarWidget',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
+        props = {
+            size = v2(288, 32) * screenScale, -- width is 15% of screen size, height is size of button assets
+            anchor = v2(0.5, 0.5),
+        },
+        content = ui.content {}
+    }
+    rootVerticalFlex.layout.content:add(topBarWidget)
+
+    -- Previous History button
+    local previousButton = ui.create {
+        name = 'previousButton',
+        type = ui.TYPE.Image,
+        --template = MWUI.templates.borders,
+        props = {
+            resource = ui.texture{ path = 'textures/omw_menu_scroll_left.dds' },
+            size = v2(24, 24) * screenScale, -- Double the size of the image, scaled to screen size
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(0, 0.5),
+            position = v2(16, 0) / screenScale, -- Nudge it over by its own size
+            alpha = 0.5, -- Starts dimmed with no History to go back to
+
+        }
+    }
+    topBarWidget.layout.content:add(previousButton)
+
+    -- Forward History button
+    local forwardButton = ui.create {
+        name = 'forwardButton',
+        type = ui.TYPE.Image,
+        props = {
+            resource = ui.texture{ path = 'textures/omw_menu_scroll_right.dds' },
+            size = v2(24, 24) * screenScale,
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(0, 0.5),
+            position = v2(48, 0) / screenScale, -- Nudge it over by twice its size (accounts for Prev button)
+            alpha = 0.5, -- Starts dimmed with no History to go forward to
+        }
+    }
+    topBarWidget.layout.content:add(forwardButton)
+
+    -- Exit Menu button
+    local exitButton = ui.create {
+        name = 'exitButton',
+        type = ui.TYPE.Image,
+        props = {
+            resource = ui.texture{ path = 'textures/menu_exitgame.dds' },
+            size = v2(96, 48) * screenScale, -- 75% of original texture size
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(1, 0.5),
+            position = v2(-32, 4) * screenScale, -- Nudges it over
+        },
+        events = {},
+    }
+
+    -- Exit Button mouse events
+    exitButton.layout.events = {
+        focusGain = async:callback(function()
+            onFrameFunctions['exitButtonFocusGain'] = function()
+                exitButtonLogic(exitButton, 'textures/menu_exitgame_over.dds', false)
+            end
+        end),
+        focusLoss = async:callback(function()
+            onFrameFunctions['exitButtonFocusLoss'] = function()
+                exitButtonLogic(exitButton, 'textures/menu_exitgame.dds', false)
+            end
+        end),
+        mousePress = async:callback(function()
+            onFrameFunctions['exitButtonMousePress'] = function()
+                exitButtonLogic(exitButton, 'textures/menu_exitgame_pressed.dds', false)
+            end
+        end),
+        mouseRelease = async:callback(function()
+            onFrameFunctions['exitButtonMouseRelease'] = function()
+                exitButtonLogic(exitButton, 'textures/menu_exitgame.dds', true)
+            end
+        end)
+    }
+
+    topBarWidget.layout.content:add(exitButton)
+
+    -- This is a horizontal flex for the page list and page content
+    local rootHorizontalFlex = ui.create {
+        name = 'rootHorizontalFlex',
+        type = ui.TYPE.Flex,
+        template = MWUI.templates.borders,
+        props = {
+            horizontal = true,
+        },
+        content = ui.content {},
+    }
+    rootVerticalFlex.layout.content:add(rootHorizontalFlex)
+
+    -- Left-side Column will hold our Title and Page List
+    local mainColumnContainer = ui.create {
+        name = 'mainColumnContainer',
+        type = ui.TYPE.Container,
+        template = MWUI.templates.borders,
+        props = {
+            anchor = v2(0.5, 0.5),
+        },
+        content = ui.content {},
+    }
+    rootHorizontalFlex.layout.content:add(mainColumnContainer)
+
+    -- Flex which allows our left-side column to grow
+    local mainColumnFlex = ui.create {
+        name = 'mainColumnFlex',
+        type = ui.TYPE.Flex,
+        props = {
+            horizontal = false,
+        },
+        content = ui.content {},
+    }
+    mainColumnContainer.layout.content:add(mainColumnFlex)
+
+    -- Widget to hold the Title and Subtitle
+    local titleBoxWidget = ui.create {
+        name = 'titleBoxWidget',
+        type = ui.TYPE.Widget,
+        --template = MWUI.templates.borders,
+        props = {
+            size = v2(288, 108) * screenScale, -- Scale by Screen Size
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(0.5, 0.5),
+        },
+        content = ui.content {},
+    }
+    mainColumnFlex.layout.content:add(titleBoxWidget) -- Gets added to left-side column
+
+    -- Title Text above our Page List
+    local titleText = ui.create {
+        type = ui.TYPE.Text,
+        name = 'titleText',
+        props = {
+            text = modLocale('tavern_menu_title', {}),
+            textSize = 24 * screenScale, -- Scale by screen size
+            textColor = morrowindGold,
+            textShadow = true,
+            textShadowColor = colorBlack,
+            textAlignH = ui.ALIGNMENT.Center,
+            textAlignV = ui.ALIGNMENT.Center,
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(0.5, 0), -- Anchors halfway across X, top of Y
+            position = v2(0, 32) -- Brings it down fraction of the box's height
+        }
+    }
+    titleBoxWidget.layout.content:add(titleText)
+
+    -- Subtitle Text below the Title Text
+    subtitleText = ui.create {
+        type = ui.TYPE.Text,
+        name = 'subtitleText',
+        props = {
+            text = '',
+            textSize = 18 * screenScale,
+            textColor = morrowindLight,
+            textShadow = true,
+            textShadowColor = colorBlack,
+            textAlignH = ui.ALIGNMENT.Center,
+            textAlignV = ui.ALIGNMENT.Center,
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(0.5, 0), -- Mirrors Title position
+            position = v2(0, 72) * screenScale, -- Brings the Subtitle down by: (Title Text Position) - (Subtitle Font Size * 1.5)
+        }
+    }
+    titleBoxWidget.layout.content:add(subtitleText)
+
+    -- Page List Container wraps around the page list
+    local pageListContainer = ui.create {
+        name = 'pageListContainer',
+        type = ui.TYPE.Container,
+        template = MWUI.templates.borders,
+        props = {
+            anchor = v2(0.5, 0.5),
+        },
+        content = ui.content {},
+    }
+    mainColumnFlex.layout.content:add(pageListContainer)
+
+    -- This widget limits the size of the page list (so we have to scroll through it)
+    local pageListWidget = ui.create {
+        name = 'pageListWidget',
+        type = ui.TYPE.Widget,
+        props = {
+            anchor = v2(0.5, 0.5),
+            size = v2(565, 648) * screenScale,
+        },
+        content = ui.content {},
+    }
+    pageListContainer.layout.content:add(pageListWidget)
+
+    -- Page List flex so our page list can grow
+    local pageListFlex = ui.create {
+        name = 'pageListFlex',
+        type = ui.TYPE.Flex,
+        props = {
+            relativePosition = v2(0.5, 0.5),
+            horizontal = false,
+        },
+        content = ui.content {},
+    }
+    pageListWidget.layout.content:add(pageListFlex)
+
+    -- Calls our Page Handler
+    pageHandler.setOnFrames({ -- Sends our function for adding onFrame functions
+        addOnFrameFunction = addOnFrameFunction,
+    })
+    pageHandler.registerAllPages(pageListFlex, screenSize)
+    pageHandler.buildPageList()
+
+    -- Container for our Page Content to hold elements
+    local pageContentContainer = ui.create {
+        name = 'pageContentContainer',
+        type = ui.TYPE.Container,
+        props = {
+            anchor = v2(0.5, 0.5),
+        },
+        content = ui.content {},
+    }
+    rootHorizontalFlex.layout.content:add(paddingSpacer)
+    rootHorizontalFlex.layout.content:add(pageContentContainer)
+
+    -- Flex of our Page Content
+    local pageContentFlex = ui.create {
+        name = 'pageContentFlex',
+        type = ui.TYPE.Flex,
+        template = MWUI.templates.borders,
+        props = {
+            horizontal = false,
+        },
+        content = ui.content {}
+    }
+    pageContentContainer.layout.content:add(pageContentFlex)
+
+    -- Page Description box
+    local pageDescWidget = ui.create {
+        name = 'pageDescWidget',
+        type = ui.TYPE.Widget,
+        props = {
+            anchor = v2(0.5, 0.5),
+            size = v2(576, 108),
+        },
+        content = ui.content {},
+    }
+    pageContentFlex.layout.content:add(pageDescWidget)
+
+    -- Page Description text
+    local pageDescText = ui.create {
+        name = 'pageDescText',
+        type = ui.TYPE.Text,
+        props = {
+            --anchor = v2(0.5, 0.5),
+            text = "Page Description Here",
+            textSize = 18 * screenScale,
+            textColor = morrowindLight,
+            textShadow = true,
+            textShadowColor = colorBlack,
+            textAlignH = ui.ALIGNMENT.Start,
+            textAlignV = ui.ALIGNMENT.Start,
+        },
+    }
+    pageDescWidget.layout.content:add(pageDescText)
+
+    -- The bottom bar, which runs along the bottom of the window
+    local bottomBarWidget = ui.create {
+        name = 'bottomBarWidget',
+        type = ui.TYPE.Widget,
+        --template = MWUI.templates.borders,
+        props = {
+            size = v2(288, 24) * screenScale, -- width is 15% of screen size
+            anchor = v2(0.5, 0.5),
+        },
+        content = ui.content {}
+    }
+    rootVerticalFlex.layout.content:add(bottomBarWidget)
+
+    -- Version Text in bottom left corner of Bottom Bar
+    local versionText = ui.create {
+        type = ui.TYPE.Text,
+        name = 'versionText',
+        props = {
+            text = modLocale('otk_mod_version', {}),
+            textSize = 14 * screenScale,
+            textColor = morrowindLight,
+            textShadow = false,
+            anchor = v2(0, 1), -- Anchors self by top-right corner
+            relativePosition = v2(0, 1), -- Anchors to bottom-left corner of title box
+            position = v2(7, -4) * screenScale, -- Offsets it by a few pixels
+        }
+    }
+    bottomBarWidget.layout.content:add(versionText)
+
+    print('[OTK] OTKTavernMenu: Tavern Menu built!')
+end
+
+-- Function called to open the menu
+local function openMenu()
+    if isRootVisible() then return end
+
+    print('[OTK] OTKTavernMenu: Opening the Tavern Menu')
+
+    -- Assign a random subtitle text
+    local randomSplash = math.random(1, #splashList)
+    subtitleText.layout.props.text = splashList[randomSplash]
+    subtitleText:update()
+
+    interfaces.UI.setMode('Interface', { windows = {}, target = self.object }) -- Clears the UI and unlocks the mouse
+    rootContainer.layout.props.visible = true -- Displays the menu
+    rootContainer:update() -- Required any time a UI element is changed
+end
+
+-- Function called by Trigger keybind to open/close the menu
+local function toggleMenu()
+    if isRootVisible() then
+        onFrameFunctions['closeMenu'] = closeMenu -- Add it to our onFrame functions to avoid Delayed Action problems
+    else
+        openMenu()
+    end
+end
+
+-- Tavern Hotkey handler, looks for our Trigger in OTKConfigHotkey.lua
+input.registerTriggerHandler('otk_openmenu', async:callback(toggleMenu)) -- Calls toggleMenu()
+
+-- Checks for Escape key to close menu
+local function onKeyPress(key)
+    if isRootVisible() and key.code == input.KEY.Escape then
+        onFrameFunctions['closeMenu'] = closeMenu
+    end
+end
+
+-- Right Click checker to close menu
+local function onMouseButtonPress(button)
+    if isRootVisible() and button == 3 then -- '3' = right click
+        onFrameFunctions['closeMenu'] = closeMenu
+    end
+end
+
+-- onFrame is used to call Functions from buttons
+local function onFrame(dt)
+    if not isRootVisible() then return end
+
+    for key, func in pairs(onFrameFunctions) do
+        onFrameFunctions[key] = nil
+        if func then
+            func(dt)
+        end
+    end
+end
+
+local function onLoad()
+    buildMenu()
+end
+
+local function onInit()
+    buildMenu()
+end
+
+return {
+    engineHandlers = {
+        onLoad = onLoad,
+        onKeyPress = onKeyPress,
+        onMouseButtonPress = onMouseButtonPress,
+        onFrame = onFrame,
+    },
+    eventHandlers = {
+        AddOnFrameFunction = addOnFrameFunction,
+    }
+}
