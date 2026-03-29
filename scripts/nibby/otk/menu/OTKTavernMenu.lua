@@ -19,10 +19,11 @@ local morrowindLight = util.color.rgb(0.87451, 0.788235, 0.623529)
 local colorBlack = util.color.rgb(0, 0, 0)
 local whiteTexture = constants.whiteTexture
 
--- UI Variable storage
+-- UI Variable storage; these are generally called early to be checked or used by other functions
 local rootContainer -- Declared early for 'if' statement checks
 local subtitleText -- Declare early for random changing in openMenu()
 local onFrameFunctions = {} -- Used for button functions to call onFrame
+local scrollableWindow = nil -- Used by mouse wheel function
 
 -- Helper function which returns True if the menu's Root element is open
 local function isRootVisible()
@@ -293,12 +294,15 @@ local function buildMenu()
     local pageListFlex = ui.create {
         name = 'pageListFlex',
         type = ui.TYPE.Flex,
+        template = MWUI.templates.borders,
         props = {
             relativePosition = v2(0.5, 0.5),
             horizontal = false,
+            position = v2(0, 0),
         },
         content = ui.content {},
     }
+
     pageListWidget.layout.content:add(pageListFlex)
 
     -- Calls our Page Handler
@@ -447,6 +451,14 @@ local function onFrame(dt)
     end
 end
 
+-- Mouse wheel behavior
+local function onMouseWheel(direction)
+    if not rootContainer then return end
+
+    direction = direction * 10 -- Increases our scroll speed
+    local directionV2 = v2(0, direction) -- Sets the speed as a V2 so we can add it to our UI element position V2
+end
+
 local function onLoad()
     buildMenu()
 end
@@ -461,6 +473,7 @@ return {
         onKeyPress = onKeyPress,
         onMouseButtonPress = onMouseButtonPress,
         onFrame = onFrame,
+        onMouseWheel = onMouseWheel,
     },
     eventHandlers = {
         AddOnFrameFunction = addOnFrameFunction,
