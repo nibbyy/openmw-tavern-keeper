@@ -1,6 +1,4 @@
-local pageHandler = require('scripts.nibby.otk.menu.OTKPageHandler')
-
-pageHandler.registerPage {
+return {
     name = 'upgrades',
     text = 'Upgrades',
     index = 3,
