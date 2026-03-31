@@ -61,22 +61,6 @@ local function closeMenu()
     rootContainer:update()
 end
 
--- Function used for exit button mouse logic
-local function exitButtonLogic(elem, texturePath, shouldClose)
-    elem.layout.props.resource = getTexture(texturePath)
-    elem:update()
-    if shouldClose then
-        closeMenu()
-    end
-end
-
--- Used to scroll the current window
-local function scrollWindow(elem, direction)
-    local elemCurrentPos = elem.layout.props.position -- Element current position
-
-    elem.layout.props.position = v2(0, elemCurrentPos + direction.y) -- Add our direction to it
-end
-
 -- Called by other scripts to add functions to onFrameFunctions
 local function addOnFrameFunction(key, func)
     if type(key) ~= 'string' then return end
@@ -149,7 +133,7 @@ local function buildPageList(userScreenSize, pageListModule)
             template = MWUI.templates.borders,
             props = {
                 anchor = v2(0.5, 0.5),
-                size = v2(279, 64) * screenScale,
+                size = v2(288, 64) * screenScale,
                 relativePosition = v2(0.5, 0.5),
             },
             content = ui.content {},
@@ -200,7 +184,6 @@ local function buildPageList(userScreenSize, pageListModule)
             content = ui.content {},
             events = {},
         }
-        pageWidget.layout.content:add(clickBox) -- Add our clickbox over top of other elements
         
         clickBox.layout.events = {
             focusGain = async:callback(function ()
@@ -238,13 +221,89 @@ local function buildPageList(userScreenSize, pageListModule)
                 end
             end)
         }
+        pageWidget.layout.content:add(clickBox) -- Add our clickbox over top of other elements
 
         pageListModule.layout.content:add(pageWidget)
         --pageListModule.layout.content:add{ props = { size = v2(5, 5) } } -- Creates a 5 pixel spacer between pages
     end
 end
 
--- Called onLoad to construct the menu
+-- Function called for mouse wheel behavior in the page list
+local function pageListScroll(direction)
+    if not scrollableWindow then return end -- scrollableWindow can become nil between frames
+    local elemCurrentPos = scrollableWindow.layout.props.position -- get our element's position as a v2
+
+    if direction > 0 and elemCurrentPos.y >= 0 then -- scrolling up; if its at 0 we don't want it to go 'up' any more
+        return
+    elseif direction < 0 then -- scrolling down
+        local pageListLength = (64 * #pageList) -- each page button is 64 pixels
+        local parentLength = 368 -- length of our parent widget element
+
+        if pageListLength < parentLength then return end -- Don't scroll if the page list isn't longer than the element
+
+        local heightDifference = pageListLength - parentLength -- Get the difference between the two elements length
+        if elemCurrentPos.y <= (heightDifference * -1) then -- Don't allow the user to scroll if there is no room to (convert heightDifference to -1 for going 'down')
+            return
+        end
+    end
+
+    -- Scroll the window
+    scrollableWindow.layout.props.position = v2(elemCurrentPos.x, elemCurrentPos.y + direction)
+    scrollableWindow:update()
+end
+
+-- Function used for exit button mouse logic
+local function exitButtonLogic(elem, texturePath, shouldClose)
+    elem.layout.props.resource = getTexture(texturePath)
+    elem:update()
+    if shouldClose then
+        closeMenu()
+    end
+end
+
+-- Helper function to add a scroll bar
+local function pageListScrollBar(rootFlex, compareWidget)
+    if not rootFlex then return end
+    if not compareWidget then return end
+
+    local pageListLength = (64 * #pageList) -- Each page is 64 pages
+    local compareLength = compareWidget.layout.props.size.y -- Get the length (Y) of the compared widget
+
+    if pageListLength < compareLength then return end -- There are not enough pages for a scroll bar
+
+    local elemDifference = pageListLength - compareLength -- Get the difference between the two elements
+    local scrollBarSize = compareLength * (100 - (elemDifference / compareLength)) -- Gets the scrollbar size from parent length * the elements difference
+
+    -- Creates the widget to hold our scroll bar
+    local scrollBarWidget = ui.create {
+        name = 'scrollBarWidget',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
+        props = {
+            size = v2(32, compareLength),
+        },
+        content = ui.content {},
+        events = {},
+    }
+    rootFlex.layout.content:insert(1, scrollBarWidget) -- Inserts the scroll bar to the left
+
+    -- Creates the actual scroll bar
+    local pageScrollBar = ui.create {
+        name = 'pageScrollBar',
+        type = ui.TYPE.Image,
+        props = {
+            size = v2(32, scrollBarSize),
+            resource = ui.texture { path = '.dds' }
+        },
+        content = ui.content {},
+        events = {},
+    }
+    scrollBarWidget.layout.content:add(pageScrollBar)
+
+    rootFlex:update()
+end
+
+-- Called to construct the menu
 local function buildMenu()
     print('[OTK] OTKTavernMenu: Building the Tavern Menu!')
 
@@ -370,7 +429,7 @@ local function buildMenu()
     local rootHorizontalFlex = ui.create {
         name = 'rootHorizontalFlex',
         type = ui.TYPE.Flex,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {
             horizontal = true,
         },
@@ -382,7 +441,7 @@ local function buildMenu()
     local mainColumnContainer = ui.create {
         name = 'mainColumnContainer',
         type = ui.TYPE.Container,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {
             anchor = v2(0.5, 0.5),
         },
@@ -459,31 +518,56 @@ local function buildMenu()
         type = ui.TYPE.Container,
         template = MWUI.templates.borders,
         props = {
-            anchor = v2(0.5, 0.5),
+            --relativePosition = v2(0.5, 0.5),
+            --anchor = v2(0.5, 0.5),
         },
         content = ui.content {},
     }
     mainColumnFlex.layout.content:add(pageListContainer)
+
+    -- Need a horizontal flex for our page list & scroll bar
+    local pageListHorizontalFlex = ui.create {
+        name = 'pageListHorizontalFlex',
+        type = ui.TYPE.Flex,
+        template = MWUI.templates.borders,
+        props = {
+            --anchor = v2(0.5, 0.5),
+            relativeSize = v2(1, 1),
+            horizontal = true,
+        },
+        content = ui.content {},
+    }
+    pageListContainer.layout.content:add(pageListHorizontalFlex)
+
+    -- Create our scrollbar container to be filled later (if theres a need for it)
+    local pageListScrollbarContainer = ui.create {
+        name = 'pageListScrollbarContainer',
+        type = ui.TYPE.Container,
+        props = {},
+        content = ui.content {},
+    }
+    pageListHorizontalFlex.layout.content:add(pageListScrollbarContainer)
 
     -- This widget limits the size of the page list (so we have to scroll through it)
     local pageListWidget = ui.create {
         name = 'pageListWidget',
         type = ui.TYPE.Widget,
         props = {
-            anchor = v2(0.5, 0.5),
-            size = v2(565, 648) * screenScale,
+            size = v2(288, 368) * screenScale,
         },
         content = ui.content {},
     }
-    pageListContainer.layout.content:add(pageListWidget)
+
+    -- Delay adding to pageListWidget in case scroll bar is needed
+    pageListHorizontalFlex.layout.content:add(pageListWidget)
 
     -- Page List flex so our page list can grow
     local pageListFlex = ui.create {
         name = 'pageListFlex',
         type = ui.TYPE.Flex,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {
-            relativePosition = v2(0.5, 0.5),
+            relativeSize = v2(1, 1),
             horizontal = false,
             position = v2(0, 0),
         },
@@ -505,6 +589,9 @@ local function buildMenu()
     -- Load our Page modules
     loadPageFiles()
     buildPageList(screenSize, pageListFlex)
+
+    -- Calls for our scroll bar function for the page list
+    pageListScrollBar(pageListHorizontalFlex, pageListWidget)
 
     -- Container for our Page Content to hold elements
     local pageContentContainer = ui.create {
@@ -536,7 +623,7 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         props = {
             anchor = v2(0.5, 0.5),
-            size = v2(576, 108),
+            size = v2(571, 108) * screenScale, -- twice as wide as the title box
         },
         content = ui.content {},
     }
@@ -565,7 +652,7 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         --template = MWUI.templates.borders,
         props = {
-            size = v2(288, 24) * screenScale, -- width is 15% of screen size
+            size = v2(384, 32) * screenScale, -- width is 15% of screen size
             anchor = v2(0.5, 0.5),
         },
         content = ui.content {}
@@ -650,15 +737,13 @@ local function onMouseWheel(vertical, horizontal)
     if not isRootVisible() or not scrollableWindow then return end -- Only in our UI; only in a scrollable window
     vertical = vertical * 5 -- Increases the scroll speed
 
-    local currentElemPos = scrollableWindow.layout.props.position -- Get current UI elem position as v2
     local currentElemName = scrollableWindow.layout.name -- Used for onFrameFunctions key
 
-    -- Add the scroll function to onFrameFunctions
-    onFrameFunctions[currentElemName..'_scrolled'] = function ()
-        if not scrollableWindow then return end -- Between frames scrollableWindow can become nil (since we pass through onFrame)
-        scrollableWindow.layout.props.position = v2(currentElemPos.x, currentElemPos.y + vertical) -- Add our direction to our elements position
-        scrollableWindow:update() -- Update it
+    -- page list scroll behavior
+    if currentElemName == 'pageListFlex' then
+        onFrameFunctions[currentElemName..'_scrolled'] = pageListScroll(vertical)
     end
+
 end
 
 local function onLoad()
