@@ -1,3 +1,8 @@
+-- OpenMW Tavern Keeper
+-- Tavern UI Menu
+-- Thank you to:
+-- Ownlyme, Hyacinth, nox7, S3ctor
+
 local input = require('openmw.input')
 local core = require('openmw.core')
 local async = require('openmw.async')
@@ -266,13 +271,13 @@ local function pageListScrollBar(rootFlex, compareWidget)
     if not rootFlex then return end
     if not compareWidget then return end
 
-    local pageListLength = (64 * #pageList) -- Each page is 64 pages
+    local pageListLength = (64 * #pageList) -- Each page is 64 pixels
     local compareLength = compareWidget.layout.props.size.y -- Get the length (Y) of the compared widget
 
     if pageListLength < compareLength then return end -- There are not enough pages for a scroll bar
 
     local elemDifference = pageListLength - compareLength -- Get the difference between the two elements
-    local scrollBarSize = compareLength * (100 - (elemDifference / compareLength)) -- Gets the scrollbar size from parent length * the elements difference
+    local scrollBarSize = compareLength - elemDifference -- Gets the scrollbar size from parent length - the elements difference
 
     -- Creates the widget to hold our scroll bar
     local scrollBarWidget = ui.create {
@@ -293,26 +298,27 @@ local function pageListScrollBar(rootFlex, compareWidget)
         type = ui.TYPE.Image,
         props = {
             size = v2(32, scrollBarSize),
-            resource = ui.texture { path = '.dds' }
+            resource = ui.texture { path = 'textures/menu_scroll_bar_vert.dds' }
         },
         content = ui.content {},
         events = {},
     }
     scrollBarWidget.layout.content:add(pageScrollBar)
 
-    rootFlex:update()
+    --rootFlex:update()
 end
 
 -- Called to construct the menu
 local function buildMenu()
-    print('[OTK] OTKTavernMenu: Building the Tavern Menu!')
+    print('[OTK] OTKTavernMenu.buildMenu: Building the Tavern Menu!')
 
     -- Variables used to scale assets by screen size
-    local screenSize = ui.screenSize()
-    local screenScale = math.min(screenSize.x / 1920, screenSize.y / 1080) -- Should be applied to all pixel-based sized elements
+    local screenSize = ui.layers[2].size
+    local rootSize = v2(screenSize.x * 0.2, screenSize.y * 0.3) -- Defines our root widget size
+    --local screenScale = math.min(screenSize.x / 1920, screenSize.y / 1080) -- Should be applied to all pixel-based sized elements
 
     -- Lets us easily add spacing to elements ui.content{} for spacing
-    local paddingSpacer = { props = { size = (v2(5, 5) * screenScale) } }
+    local paddingSpacer = { props = { size = (v2(5, 5)) } }
 
     -- Root element, from which the entire UI is built. We also use it for 'if' statements
     rootContainer = ui.create {
@@ -323,13 +329,13 @@ local function buildMenu()
         props = {
             visible = false,
             anchor = v2(0.5, 0.5), -- Element anchors on its own center instead of top-left corner
-            relativePosition = v2(0.5, 0.5), -- Element is positioned at center of screen
+            relativePosition = v2(0.5, 0.5), -- Halfway across and down
         },
         content = ui.content {},
     }
     rootContainer.layout.content:add(paddingSpacer)
 
-    -- Root Flex Widget, which will allow the UI to grow easily
+    -- Root Vertical Flex, which will allow the UI to grow vertically
     local rootVerticalFlex = ui.create {
         name = 'rootVerticalFlex',
         type = ui.TYPE.Flex,
@@ -346,24 +352,41 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         template = MWUI.templates.borders,
         props = {
-            size = v2(288, 32) * screenScale, -- width is 15% of screen size, height is size of button assets
+            size = v2(rootSize.x, 48), -- width is rootSize, height is size of exit button asset
             anchor = v2(0.5, 0.5),
         },
-        content = ui.content {}
+        content = ui.content {},
+        events = {},
     }
+
+    -- Event for allowing the UI to be moved
+    -- Thanks to nox7 and S3ctor
+    topBarWidget.layout.events = {
+        mouseMove = async:callback(function (event)
+            if event.button ~= 1 then return end -- Checks for left click
+
+            onFrameFunctions[topBarWidget.layout.name..'_mouseMove'] = function ()
+                local mousePos = event.position
+                local mouseOffset = event.offset
+
+                rootContainer.layout.props.position = mouseOffset
+                rootContainer:update()
+            end
+        end)
+    }
+
     rootVerticalFlex.layout.content:add(topBarWidget)
 
     -- Previous History button
     local previousButton = ui.create {
         name = 'previousButton',
         type = ui.TYPE.Image,
-        --template = MWUI.templates.borders,
         props = {
             resource = ui.texture{ path = 'textures/omw_menu_scroll_left.dds' },
-            size = v2(24, 24) * screenScale, -- Double the size of the image, scaled to screen size
+            size = v2(24, 24), -- Double the size of the image
             anchor = v2(0.5, 0.5),
             relativePosition = v2(0, 0.5),
-            position = v2(16, 0) / screenScale, -- Nudge it over by its own size
+            position = v2(16, 0), -- Nudge it over
             alpha = 0.5, -- Starts dimmed with no History to go back to
 
         }
@@ -376,10 +399,10 @@ local function buildMenu()
         type = ui.TYPE.Image,
         props = {
             resource = getTexture('textures/omw_menu_scroll_right.dds'),
-            size = v2(24, 24) * screenScale,
+            size = v2(24, 24),
             anchor = v2(0.5, 0.5),
             relativePosition = v2(0, 0.5),
-            position = v2(48, 0) / screenScale, -- Nudge it over by twice its size (accounts for Prev button)
+            position = v2(48, 0), -- Nudge it over by twice its size (accounts for Prev button)
             alpha = 0.5, -- Starts dimmed with no History to go forward to
         }
     }
@@ -391,10 +414,10 @@ local function buildMenu()
         type = ui.TYPE.Image,
         props = {
             resource = getTexture('textures/menu_exitgame.dds'),
-            size = v2(96, 48) * screenScale, -- 75% of original texture size
+            size = v2(96, 48), -- 75% of original texture size
             anchor = v2(0.5, 0.5),
             relativePosition = v2(1, 0.5),
-            position = v2(-32, 4) * screenScale, -- Nudges it over
+            position = v2(-32, 4), -- Nudges it over
         },
         events = {},
     }
@@ -425,11 +448,10 @@ local function buildMenu()
 
     topBarWidget.layout.content:add(exitButton)
 
-    -- This is a horizontal flex for the page list and page content
+    -- This is the horizontal flex for the page list and page content
     local rootHorizontalFlex = ui.create {
         name = 'rootHorizontalFlex',
         type = ui.TYPE.Flex,
-        --template = MWUI.templates.borders,
         props = {
             horizontal = true,
         },
@@ -438,19 +460,18 @@ local function buildMenu()
     rootVerticalFlex.layout.content:add(rootHorizontalFlex)
 
     -- Left-side Column will hold our Title and Page List
-    local mainColumnContainer = ui.create {
+    local leftColumnContainer = ui.create {
         name = 'mainColumnContainer',
         type = ui.TYPE.Container,
-        --template = MWUI.templates.borders,
         props = {
             anchor = v2(0.5, 0.5),
         },
         content = ui.content {},
     }
-    rootHorizontalFlex.layout.content:add(mainColumnContainer)
+    rootHorizontalFlex.layout.content:add(leftColumnContainer)
 
     -- Flex which allows our left-side column to grow
-    local mainColumnFlex = ui.create {
+    local leftColumnFlex = ui.create {
         name = 'mainColumnFlex',
         type = ui.TYPE.Flex,
         props = {
@@ -458,7 +479,7 @@ local function buildMenu()
         },
         content = ui.content {},
     }
-    mainColumnContainer.layout.content:add(mainColumnFlex)
+    leftColumnContainer.layout.content:add(leftColumnFlex)
 
     -- Widget to hold the Title and Subtitle
     local titleBoxWidget = ui.create {
@@ -466,13 +487,13 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         --template = MWUI.templates.borders,
         props = {
-            size = v2(288, 108) * screenScale, -- Scale by Screen Size
+            size = v2(rootSize.x, (rootSize.y / 3)), -- Width is rootSize, height is 1/3 of rootSize
             anchor = v2(0.5, 0.5),
             relativePosition = v2(0.5, 0.5),
         },
         content = ui.content {},
     }
-    mainColumnFlex.layout.content:add(titleBoxWidget) -- Gets added to left-side column
+    leftColumnFlex.layout.content:add(titleBoxWidget) -- Gets added to left-side column
 
     -- Title Text above our Page List
     local titleText = ui.create {
@@ -480,7 +501,7 @@ local function buildMenu()
         name = 'titleText',
         props = {
             text = modLocale('tavern_menu_title', {}),
-            textSize = 24 * screenScale, -- Scale by screen size
+            textSize = 22,
             textColor = morrowindGold,
             textShadow = true,
             textShadowColor = colorBlack,
@@ -488,7 +509,7 @@ local function buildMenu()
             textAlignV = ui.ALIGNMENT.Center,
             anchor = v2(0.5, 0.5),
             relativePosition = v2(0.5, 0), -- Anchors halfway across X, top of Y
-            position = v2(0, 32) -- Brings it down fraction of the box's height
+            position = v2(0, ((rootSize.y / 3) / 4)) -- Brings it down 1/4 of the box's height
         }
     }
     titleBoxWidget.layout.content:add(titleText)
@@ -499,15 +520,15 @@ local function buildMenu()
         name = 'subtitleText',
         props = {
             text = '',
-            textSize = 18 * screenScale,
+            textSize = 18,
             textColor = morrowindLight,
             textShadow = true,
             textShadowColor = colorBlack,
             textAlignH = ui.ALIGNMENT.Center,
             textAlignV = ui.ALIGNMENT.Center,
             anchor = v2(0.5, 0.5),
-            relativePosition = v2(0.5, 0), -- Mirrors Title position
-            position = v2(0, 72) * screenScale, -- Brings the Subtitle down by: (Title Text Position) - (Subtitle Font Size * 1.5)
+            relativePosition = v2(0.5, 0.5), -- Centers the Subtitle
+            position = v2(0, ((rootSize.y / 3) / 5)) -- Brings it down 1/5 of the box's height
         }
     }
     titleBoxWidget.layout.content:add(subtitleText)
@@ -517,21 +538,17 @@ local function buildMenu()
         name = 'pageListContainer',
         type = ui.TYPE.Container,
         template = MWUI.templates.borders,
-        props = {
-            --relativePosition = v2(0.5, 0.5),
-            --anchor = v2(0.5, 0.5),
-        },
+        props = {},
         content = ui.content {},
     }
-    mainColumnFlex.layout.content:add(pageListContainer)
+    leftColumnFlex.layout.content:add(pageListContainer)
 
-    -- Need a horizontal flex for our page list & scroll bar
+    -- Horizontal flex for our page list & scroll bar
     local pageListHorizontalFlex = ui.create {
         name = 'pageListHorizontalFlex',
         type = ui.TYPE.Flex,
         template = MWUI.templates.borders,
         props = {
-            --anchor = v2(0.5, 0.5),
             relativeSize = v2(1, 1),
             horizontal = true,
         },
@@ -539,7 +556,7 @@ local function buildMenu()
     }
     pageListContainer.layout.content:add(pageListHorizontalFlex)
 
-    -- Create our scrollbar container to be filled later (if theres a need for it)
+    -- Scrollbar container, which is only given a scrollbar if there are enough pages for one
     local pageListScrollbarContainer = ui.create {
         name = 'pageListScrollbarContainer',
         type = ui.TYPE.Container,
@@ -548,12 +565,12 @@ local function buildMenu()
     }
     pageListHorizontalFlex.layout.content:add(pageListScrollbarContainer)
 
-    -- This widget limits the size of the page list (so we have to scroll through it)
+    -- Page List widget which limits the size of the page list (so we have to scroll through it)
     local pageListWidget = ui.create {
         name = 'pageListWidget',
         type = ui.TYPE.Widget,
         props = {
-            size = v2(288, 368) * screenScale,
+            size = v2(rootSize.x, rootSize.y),
         },
         content = ui.content {},
     }
@@ -623,7 +640,7 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         props = {
             anchor = v2(0.5, 0.5),
-            size = v2(571, 108) * screenScale, -- twice as wide as the title box
+            size = v2(571, 108), -- twice as wide as the title box
         },
         content = ui.content {},
     }
@@ -636,7 +653,7 @@ local function buildMenu()
         props = {
             --anchor = v2(0.5, 0.5),
             text = "Page Description Here",
-            textSize = 18 * screenScale,
+            textSize = 18,
             textColor = morrowindLight,
             textShadow = true,
             textShadowColor = colorBlack,
@@ -652,7 +669,7 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         --template = MWUI.templates.borders,
         props = {
-            size = v2(384, 32) * screenScale, -- width is 15% of screen size
+            size = v2(384, 32), -- width is 15% of screen size
             anchor = v2(0.5, 0.5),
         },
         content = ui.content {}
@@ -665,12 +682,12 @@ local function buildMenu()
         name = 'versionText',
         props = {
             text = modLocale('otk_mod_version', {}),
-            textSize = 14 * screenScale,
+            textSize = 14,
             textColor = morrowindLight,
             textShadow = false,
             anchor = v2(0, 1), -- Anchors self by top-right corner
             relativePosition = v2(0, 1), -- Anchors to bottom-left corner of title box
-            position = v2(7, -4) * screenScale, -- Offsets it by a few pixels
+            position = v2(7, -4), -- Offsets it by a few pixels
         }
     }
     bottomBarWidget.layout.content:add(versionText)
@@ -733,15 +750,15 @@ local function onFrame(dt)
 end
 
 -- Mouse wheel behavior
-local function onMouseWheel(vertical, horizontal)
+local function onMouseWheel(direction)
     if not isRootVisible() or not scrollableWindow then return end -- Only in our UI; only in a scrollable window
-    vertical = vertical * 5 -- Increases the scroll speed
+    direction = direction * 5 -- Increases the scroll speed
 
     local currentElemName = scrollableWindow.layout.name -- Used for onFrameFunctions key
 
     -- page list scroll behavior
     if currentElemName == 'pageListFlex' then
-        onFrameFunctions[currentElemName..'_scrolled'] = pageListScroll(vertical)
+        onFrameFunctions[currentElemName..'_scrolled'] = pageListScroll(direction)
     end
 
 end
