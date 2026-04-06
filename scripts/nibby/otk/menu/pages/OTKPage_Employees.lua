@@ -1,5 +1,5 @@
 return {
     name = 'employees',
     text = 'Employees',
-    index = 5,
+    index = 6,
 }

@@ -1,5 +1,5 @@
 -- OpenMW Tavern Keeper
--- Tavern UI Menu
+-- Tavern UI Menu by nibby
 -- Thank you to:
 -- Ownlyme, Hyacinth, nox7, S3ctor
 
@@ -21,8 +21,10 @@ local MWUI = interfaces.MWUI
 local colorGetter = require('scripts.nibby.otk.menu.OTKColorGetter')
 local splashList = require('scripts.nibby.otk.menu.OTKSubtitleSplashes')
 
+-- Page variables
 local pageFilePath = 'scripts/nibby/otk/menu/pages/'
 local pageList = {}
+local pageCount = 0
 
 -- Art asset shorthands
 local morrowindGold = util.color.rgb(0.792157, 0.647059, 0.376471)
@@ -33,24 +35,45 @@ local whiteTexture = constants.whiteTexture
 -- UI Variable storage; these are generally called early to be checked or used by other functions
 local rootContainer -- Declared early for 'if' statement checks
 local subtitleText -- Declare early for random changing in openMenu()
-local onFrameFunctions = {} -- Used for button functions to call onFrame
-local scrollableWindow = nil -- Used by mouse wheel function
+local pageButtonSize = 52 -- The size of our page buttons
 
--- Helper function which returns True if the menu's Root element is open
+-- Scroll bar constants
+local VERTICAL_SCROLLBAR_THICKNESS = 8
+local HORIZONTAL_SCROLLBAR_THICKNESS = 16
+local VERTICAL_THUMB_SIZE = v2(4, 64)
+local HORIZONTAL_THUMB_SIZE = v2(16, 16)
+local VERTICAL_THUMB_CAP_HEIGHT = 4
+
+---@type table<string, fun(dt?: number)>
+local onFrameFunctions = {} -- Used for button functions to call onFrame
+
+-- Helper function for checking if the Root element is visible
+---@return boolean -- True if the menu is open
 local function isRootVisible()
     return rootContainer and rootContainer.layout.props.visible ~= false
 end
 
--- Texture cache helper function
+-- Helper function for finding the length of the page list
+---@return integer -- UI pixel size of the page list
+local function getPageListSize()
+    return pageButtonSize * pageCount
+end
+
 local textureCache = {}
+-- Helper function for a simple texture cache; returns a cached ui.texture
+---@param path string -- Texture resource path
+---@return any ui.texture -- Returned ui.texture from cache
 local function getTexture(path)
-    if not textureCache[path] then
-        textureCache[path] = ui.texture{path = path}
+    if not textureCache[path] then -- Texture isn't in cache
+        textureCache[path] = ui.texture{path = path} -- Add it
     end
-    return textureCache[path]
+    return textureCache[path] -- Return the cached texture
 end
 
 -- Helper function to darken RGB colors
+---@param color table -- util.color.rgb table
+---@param multiplier number -- Amount to multiply the RGB by
+---@return any util.color.rgb -- Returned util.color.rgb()
 local function darkenColor(color, multiplier)
     return util.color.rgb(color.r * multiplier, color.g * multiplier, color.b * multiplier)
 end
@@ -67,13 +90,21 @@ local function closeMenu()
 end
 
 -- Called by other scripts to add functions to onFrameFunctions
+---@param key string -- Name for function (mostly used to remove itself)
+---@param func fun(dt?: number) -- The function to run; (dt) is time taken from onFrame
 local function addOnFrameFunction(key, func)
     if type(key) ~= 'string' then return end
     if type(func) ~= 'function' then return end
     onFrameFunctions[key] = func
 end
 
+---@class TavernPage
+---@field name string -- Returned name string from module
+---@field text string -- Returned text string from module
+---@field index integer -- Returned index integer from module
+
 -- Registers our pages by information from their .lua module
+---@param page TavernPage -- Page .lua module
 local function registerPage(page)
     if type(page) ~= 'table' then
         print('[OTK - ERR] OTKTavernMenu.registerPage expected Page table, got: ' .. tostring(type(page)))
@@ -97,6 +128,9 @@ local function registerPage(page)
 
     if pageList[page.index] == nil then
         pageList[page.index] = page
+        if page.index > pageCount then
+            pageCount = page.index
+        end
     else
         print('[OTK - ERR] OTKTavernMenu.registerPage: Page: ' ..tostring(page.name) .. ' tried to claim Page Index that was already taken: ' ..tostring(page.index))
         return
@@ -104,208 +138,543 @@ local function registerPage(page)
 end
 
 -- Function to change file directory locations to OpenMW module require names
+---@param fileName string
+---@return string
 local function pathToModuleName(fileName)
     return (fileName:gsub('\\', '.'):gsub('/', '.'):gsub('%.lua$', ""))
 end
 
 -- Function called to load Page .lua files
 local function loadPageFiles()
+    pageList = {}
+    pageCount = 0
+
     for fileName in vfs.pathsWithPrefix(pageFilePath) do
         if fileName:match('%.lua$') then
             local moduleName = pathToModuleName(fileName)
-            local page = require(moduleName)
-            registerPage(page)
+
+            local ok, pageOrErr = pcall(require, moduleName)
+            if not ok then
+                print('[OTK - ERR] OTKTavernMenu.loadPageFiles: Failed to require ' .. moduleName .. ': ' .. tostring(pageOrErr))
+            else
+                print('[OTK] Loaded page module: ' .. moduleName .. ' | type=' .. tostring(type(pageOrErr)) .. ' | index=' .. tostring(pageOrErr and pageOrErr.index))
+                registerPage(pageOrErr)
+            end
         end
     end
 end
 
--- Builds our page list from pageList info (generated by registerPage from page .lua modules)
-local function buildPageList(userScreenSize, pageListModule)
-    if not userScreenSize then
-        print('[OTK - ERR] OTKTavernMenu.buildPageList: No Screen Size passed!')
+-- Helper function to determine our scroll bar thumb texture
+---@param isHorizontal boolean
+---@return any ui.texture
+local function getThumbTexture(isHorizontal)
+    if isHorizontal then
+        return getTexture('textures/tx_scroll_button.dds')
+    else
+        return getTexture('textures/menu_scroll_button_vert.dds')
+    end
+end
+
+-- Helper function to add thumb caps to scroll bar thumb
+---@param thumbElem any -- UI element
+---@param thickness integer
+---@return any, any -- topCap, bottomCap
+local function addThumbCaps(thumbElem, thickness)
+    local topCap = ui.create {
+        type = ui.TYPE.Image,
+        name = thumbElem.layout.name .. '_topCap',
+        props = {
+            size = v2(thickness, VERTICAL_THUMB_CAP_HEIGHT),
+            anchor = v2(0.5, 0),
+            relativePosition = v2(0.5, 0),
+            resource = getTexture('textures/menu_scroll_button_top.dds'),
+        },
+    }
+
+    local bottomCap = ui.create {
+        type = ui.TYPE.Image,
+        name = thumbElem.layout.name .. '_bottomCap',
+        props = {
+            size = v2(thickness, VERTICAL_THUMB_CAP_HEIGHT),
+            anchor = v2(0.5, 1),
+            relativePosition = v2(0.5, 1),
+            resource = getTexture('textures/menu_scroll_button_bottom.dds'),
+        },
+    }
+
+    thumbElem.layout.content:add(topCap)
+    thumbElem.layout.content:add(bottomCap)
+
+    return topCap, bottomCap
+end
+
+---@class ScrollBarData
+---@field track any -- UI element
+---@field thumb any -- UI element
+---@field thumbTop any|nil -- UI element
+---@field thumbBottom any|nil -- UI element
+---@field hostElem any -- UI element
+---@field contentSize number
+---@field thickness integer
+---@field thumbLength integer
+
+---@type table<any, ScrollBarData>
+local scrollBars = {}
+
+-- Mouse wheel scrolling variables
+local scrollableWindow = nil -- Our flex element which 'moves' when scrolled
+local hostElem = nil -- Declares the 'host' element of the flex element
+local scrollContentSize = nil
+
+---@class ScrollMetrics
+---@field isHorizontal boolean
+---@field hostSize number
+---@field currentPos number
+---@field contentSize number
+---@field canScroll boolean
+---@field minPos number
+---@field scrollRange number
+---@field flexPos any -- util.vector2
+
+-- Function for getting our scroll metrics
+---@param flexElem any -- UI element
+---@param containerElem any -- UI element
+---@param contentSize number
+---@return ScrollMetrics|nil
+local function getScrollMetrics(flexElem, containerElem, contentSize)
+    if not flexElem or not flexElem.layout then
+        print('[OTK - ERR] OTKTavernMenu.getScrollMetrics: flexElem is not a UI element/does not have a .layout: ' .. tostring(flexElem))
+        return nil
+    end
+    if not containerElem or not containerElem.layout then
+        print('[OTK - ERR] OTKTavernMenu.getScrollMetrics: containerElem is not a UI element/does not have a .layout: ' .. tostring(containerElem))
+        return nil
+    end
+    if not contentSize then
+        print('[OTK - ERR] OTKTavernMenu.getScrollMetrics: contentSize is incorrect/not passed, got: ' .. tostring(contentSize))
+        return nil
+    end
+
+    local flexPos = flexElem.layout.props.position or v2(0, 0)
+    local isHorizontal = flexElem.layout.props.horizontal == true
+
+    local hostSize
+    local currentPos
+
+    if isHorizontal then
+        hostSize = containerElem.layout.props.size.x -- Get horizontal size of the host element if the flex grows horizontally
+        currentPos = flexPos.x -- Flex gets moved horizontally
+    else
+        hostSize = containerElem.layout.props.size.y -- If vertical, get its vertical size
+        currentPos = flexPos.y -- Flex gets moved vertically
+    end
+
+    if not hostSize then
+        print('[OTK - ERR] OTKTavernMenu.getScrollMetrics: Cannot find size property of containerElem: ' .. tostring(containerElem))
+        return nil
+    end
+
+    local canScroll = contentSize > hostSize -- Checks whether the flex element is larger than the host element; if so, it can scroll
+    local minPos = 0
+    local scrollRange = 0
+
+    if canScroll then
+        -- Flex starts at 0; when content is larger than visible host, scroll into negative space
+        -- Ex: host = 300, content = 900, so minPos = -600
+        minPos = hostSize - contentSize
+
+        -- Total distance the flex is allowed to travel while scrolling
+        scrollRange = math.abs(minPos)
+    end
+
+    return {
+        isHorizontal = isHorizontal,
+        hostSize = hostSize,
+        currentPos = currentPos,
+        contentSize = contentSize,
+        canScroll = canScroll,
+        minPos = minPos,
+        scrollRange = scrollRange,
+        flexPos = flexPos,
+    }
+end
+
+-- Helper Function to assign a UI target for mouse wheel scrolling
+---@param flexElem any -- UI element
+---@param containerElem any -- UI element
+---@param contentSize number
+local function setScrollTarget(flexElem, containerElem, contentSize)
+    scrollableWindow = flexElem
+    hostElem = containerElem
+    scrollContentSize = contentSize
+end
+
+-- Helper Function to clear our mouse wheel targets
+---@param flexElem any -- UI element
+local function clearScrollTarget(flexElem)
+    if scrollableWindow == flexElem then
+        scrollableWindow = nil
+        hostElem = nil
+        scrollContentSize = nil
+    end
+end
+
+-- Builds our page list from pageList info
+---@param pageFlex any -- UI element
+---@param pageListHost any -- UI element
+local function buildPageList(pageFlex, pageListHost)
+    if not pageFlex or not pageFlex.layout then return end
+    if not pageListHost or not pageListHost.layout then return end
+
+    local pageWidth = pageListHost.layout.props.size.x
+
+    -- Iterate through the page list
+    for i = 1, pageCount do
+        local page = pageList[i]
+        if page then
+            local pageWidget = ui.create {
+                type = ui.TYPE.Widget,
+                name = page.name..'_pageWidget',
+                template = MWUI.templates.borders,
+                props = {
+                    anchor = v2(0.5, 0.5),
+                    size = v2(pageWidth, pageButtonSize),
+                    relativePosition = v2(0.5, 0.5),
+                },
+                content = ui.content {},
+            }
+
+            local pageBackground = ui.create {
+                type = ui.TYPE.Image,
+                name = page.name..'_pageBackground',
+                inheritAlpha = false, -- So our text doesn't get alpha'd
+                props = {
+                    anchor = v2(0.5, 0.5),
+                    relativePosition = v2(0.5, 0.5),
+                    relativeSize = v2(1, 1),
+                    resource = whiteTexture,
+                    alpha = 0,
+                    color = colorBlack,
+                },
+                events = {},
+                content = ui.content {},
+            }
+
+            local pageText = ui.create {
+                type = ui.TYPE.Text,
+                name = page.name..'_pageButton_text',
+                props = {
+                    text = page.text,
+                    textSize = 18,
+                    textColor = colorGetter.normal,
+                    textShadow = true,
+                    textShadowColor = colorBlack,
+                    anchor = v2(0.5, 0.5),
+                    relativePosition = v2(0.5, 0.5),
+                }
+            }
+
+            pageWidget.layout.content:add(pageBackground)
+
+            pageWidget.layout.content:add(pageText)
+
+            -- Clickbox goes over top of the button
+            local clickBox = ui.create {
+                type = ui.TYPE.Image,
+                name = page.name..'_pageButton_clickBox',
+                props = {
+                    relativeSize = v2(1, 1),
+                    alpha = 0,
+                },
+                content = ui.content {},
+                events = {},
+            }
+            
+            clickBox.layout.events = {
+                focusGain = async:callback(function ()
+                    onFrameFunctions[page.name..'_focusGain'] = function ()
+                        if scrollableWindow == nil then
+                            setScrollTarget(pageFlex, pageListHost, getPageListSize())
+                        end
+                        pageBackground.layout.props.alpha = 0.4
+                        pageBackground.layout.props.color = darkenColor(morrowindGold, 0.4)
+                        pageBackground:update()
+                    end
+                end),
+                focusLoss = async:callback(function ()
+                    onFrameFunctions[page.name..'_focusLoss'] = function ()
+                        if scrollableWindow ~= nil then
+                            clearScrollTarget(pageFlex)
+                        end
+                        pageBackground.layout.props.alpha = 0
+                        pageBackground.layout.props.color = colorBlack
+                        pageBackground:update()
+                    end
+                end),
+                mousePress = async:callback(function (event)
+                    if event.button == 1 then
+                        onFrameFunctions[page.name..'_mousePress'] = function ()
+                            pageBackground.layout.props.alpha = 0.8
+                            pageBackground.layout.props.color = darkenColor(morrowindGold, 0.8)
+                            pageBackground:update()
+                        end
+                    end
+                end),
+                mouseRelease = async:callback(function (event)
+                    if event.button == 1 then
+                        onFrameFunctions[page.name..'_mouseRelease'] = function ()
+                            pageBackground.layout.props.alpha = 0.6
+                            pageBackground.layout.props.color = darkenColor(morrowindGold, 0.6)
+                            pageBackground:update()
+                        end
+                    end
+                end)
+            }
+            pageWidget.layout.content:add(clickBox) -- Add our clickbox over top of other elements
+
+            pageFlex.layout.content:add(pageWidget)
+            --pageListModule.layout.content:add{ props = { size = v2(5, 5) } } -- Creates a 5 pixel spacer between pages
+        end
+    end
+end
+
+---@type table<any, any> -- Stores each host's original size so we don't keep shrinking it
+local scrollHostSizes = {}
+
+-- Function to reserve space inside a host element for a scrollbar.
+---@param flexHost any -- UI element which contains the scrollable flex
+---@param thickness integer -- Width/height of the scrollbar track
+---@param isHorizontal boolean -- True if the flex scrolls horizontally
+---@return boolean -- True if host size was adjusted successfully
+local function reserveScrollBarSpace(flexHost, thickness, isHorizontal)
+    if not flexHost or not flexHost.layout then return false end
+
+    local hostSize = flexHost.layout.props.size
+    if not hostSize then
+        print('[OTK - ERR] OTKTavernMenu.reserveScrollBarSpace: flexHost has no size: ' .. tostring(flexHost))
+    end
+
+    -- Keep the original size so repeated calls do not keep subtracting thickness
+    local baseSize = scrollHostSizes[flexHost] or hostSize
+    scrollHostSizes[flexHost] = hostSize
+
+    if isHorizontal then
+        flexHost.layout.props.size = v2(baseSize.x, math.max(0, baseSize.y - thickness))
+    else
+        flexHost.layout.props.size = v2(math.max(0, baseSize.x - thickness), baseSize.y)
+    end
+
+    flexHost:update()
+    return true
+end
+
+---@class ScrollBarOptions
+---@field namePrefix? string
+
+-- Function called to add a scroll bar (when needed)
+---@param scrollBarHost any -- UI element
+---@param flexElem any -- UI element
+---@param flexHost any -- UI element
+---@param contentSize number
+---@param options? ScrollBarOptions
+---@return any|nil
+local function addScrollBar(scrollBarHost, flexElem, flexHost, contentSize, options)
+    if not scrollBarHost or not scrollBarHost.layout then return nil end
+
+    local scrollMetrics = getScrollMetrics(flexElem, flexHost, contentSize) -- Get our scroll bar metrics
+    if not scrollMetrics or not scrollMetrics.canScroll then return nil end -- If a scrollbar is unnecessary, we bail out early
+
+    options = options or {}
+
+    local thickness = scrollMetrics.isHorizontal and HORIZONTAL_SCROLLBAR_THICKNESS or VERTICAL_SCROLLBAR_THICKNESS -- The width (for vertical) or height (for horizontal) of the track/thumb
+
+    local namePrefix = options.namePrefix or (flexElem.layout.name or 'scroll')
+
+    -- Reserve space if a scrollbar is needed
+    reserveScrollBarSpace(flexHost, thickness, scrollMetrics.isHorizontal)
+
+    -- Recalculate after shrinking the host, since hostSize has changed
+    scrollMetrics = getScrollMetrics(flexElem, flexHost, contentSize)
+    if not scrollMetrics then return nil end
+
+    local trackSize -- The 'track' is the total size of a scrollbar
+    local thumbSize
+    local thumbLength
+
+    if scrollMetrics.isHorizontal then
+        trackSize = v2(scrollMetrics.hostSize, thickness)
+        thumbLength = math.min(HORIZONTAL_THUMB_SIZE.x, scrollMetrics.hostSize)
+        thumbSize = v2(thickness, thickness)
+    else
+        trackSize = v2(thickness, scrollMetrics.hostSize)
+        thumbLength = math.min(VERTICAL_THUMB_SIZE.y, math.max(0, scrollMetrics.hostSize - (VERTICAL_THUMB_CAP_HEIGHT * 2)))
+        thumbSize = v2(thickness, thumbLength)
+    end
+
+    local scrollBarWidget = ui.create {
+        name = namePrefix..'_scrollBarWidget',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
+        props = {
+            size = trackSize,
+        },
+        content = ui.content {},
+    }
+
+    local trackImage = ui.create {
+        name = namePrefix..'_trackImage',
+        type = ui.TYPE.Image,
+        props = {
+            relativeSize = v2(1, 1),
+            relativePosition = v2(0.5, 0.5),
+            anchor = v2(0.5, 0.5),
+            resource = getTexture('textures/tx_scroll_bar.dds'),
+        }
+    }
+    scrollBarWidget.layout.content:add(trackImage)
+
+    local scrollBarThumb = ui.create {
+        name = namePrefix..'_scrollBarThumb',
+        type = ui.TYPE.Image,
+        props = {
+            size = thumbSize,
+            resource = getThumbTexture(scrollMetrics.isHorizontal),
+            position = v2(0, 0),
+        },
+        content = ui.content {},
+    }
+
+    local thumbTop = nil
+    local thumbBottom = nil
+
+    if not scrollMetrics.isHorizontal then
+        thumbTop, thumbBottom = addThumbCaps(scrollBarThumb, thickness)
+    end
+
+    scrollBarWidget.layout.content:add(scrollBarThumb)
+    scrollBarHost.layout.content:add(scrollBarWidget)
+
+    scrollBars[flexElem] = {
+        track = scrollBarWidget,
+        thumb = scrollBarThumb,
+        thumbTop = thumbTop,
+        thumbBottom = thumbBottom,
+        hostElem = flexHost,
+        contentSize = contentSize,
+        thickness = thickness,
+        thumbLength = thumbLength,
+    }
+
+    return scrollBarWidget
+end
+
+-- Function called to update the scroll bar of a given UI element
+---@param flexElem any -- UI element
+local function updateScrollBar(flexElem)
+    local scrollBarData = scrollBars[flexElem]
+    if not scrollBarData then
+        print('[OTK - ERR] OTKTavernMenu.updateScrollBar: flexElem not found in scrollBars{}: ' .. tostring(flexElem))
         return
     end
 
-    local screenScale = math.min(userScreenSize.x / 1920, userScreenSize.y / 1080)
+    local scrollMetrics = getScrollMetrics(flexElem, scrollBarData.hostElem, scrollBarData.contentSize)
+    if not scrollMetrics then return end
 
-    if not pageListModule then return end
-
-    -- Iterate through the page list
-    for _, page in ipairs(pageList) do
-        local pageWidget = ui.create {
-            type = ui.TYPE.Widget,
-            name = page.name..'_pageWidget',
-            template = MWUI.templates.borders,
-            props = {
-                anchor = v2(0.5, 0.5),
-                size = v2(288, 64) * screenScale,
-                relativePosition = v2(0.5, 0.5),
-            },
-            content = ui.content {},
-        }
-
-        local pageBackground = ui.create {
-            type = ui.TYPE.Image,
-            name = page.name..'_pageBackground',
-            inheritAlpha = false, -- So our text doesn't get alpha'd
-            props = {
-                anchor = v2(0.5, 0.5),
-                relativePosition = v2(0.5, 0.5),
-                relativeSize = v2(1, 1),
-                resource = whiteTexture,
-                alpha = 0,
-                color = colorBlack,
-            },
-            events = {},
-            content = ui.content {},
-        }
-
-        local pageText = ui.create {
-            type = ui.TYPE.Text,
-            name = page.name..'_pageButton_text',
-            props = {
-                text = page.text,
-                textSize = 18 * screenScale,
-                textColor = colorGetter.normal,
-                textShadow = true,
-                textShadowColor = colorBlack,
-                anchor = v2(0.5, 0.5),
-                relativePosition = v2(0.5, 0.5),
-            }
-        }
-
-        pageWidget.layout.content:add(pageBackground)
-
-        pageWidget.layout.content:add(pageText)
-
-        -- Clickbox goes over top of the button
-        local clickBox = ui.create {
-            type = ui.TYPE.Image,
-            name = page.name..'_pageButton_clickBox',
-            props = {
-                relativeSize = v2(1, 1),
-                alpha = 0,
-            },
-            content = ui.content {},
-            events = {},
-        }
-        
-        clickBox.layout.events = {
-            focusGain = async:callback(function ()
-                onFrameFunctions[page.name..'_focusGain'] = function ()
-                    scrollableWindow = pageListModule -- Assigns for mouse wheel scrolling
-                    pageBackground.layout.props.alpha = 0.4
-                    pageBackground.layout.props.color = darkenColor(morrowindGold, 0.4)
-                    pageBackground:update()
-                end
-            end),
-            focusLoss = async:callback(function ()
-                onFrameFunctions[page.name..'_focusLoss'] = function ()
-                    scrollableWindow = nil -- Clears the wheel mouse behavior
-                    pageBackground.layout.props.alpha = 0
-                    pageBackground.layout.props.color = colorBlack
-                    pageBackground:update()
-                end
-            end),
-            mousePress = async:callback(function (event)
-                if event.button == 1 then
-                    onFrameFunctions[page.name..'_mousePress'] = function ()
-                        pageBackground.layout.props.alpha = 0.8
-                        pageBackground.layout.props.color = darkenColor(morrowindGold, 0.8)
-                        pageBackground:update()
-                    end
-                end
-            end),
-            mouseRelease = async:callback(function (event)
-                if event.button == 1 then
-                    onFrameFunctions[page.name..'_mouseRelease'] = function ()
-                        pageBackground.layout.props.alpha = 0.6
-                        pageBackground.layout.props.color = darkenColor(morrowindGold, 0.6)
-                        pageBackground:update()
-                    end
-                end
-            end)
-        }
-        pageWidget.layout.content:add(clickBox) -- Add our clickbox over top of other elements
-
-        pageListModule.layout.content:add(pageWidget)
-        --pageListModule.layout.content:add{ props = { size = v2(5, 5) } } -- Creates a 5 pixel spacer between pages
+    if not scrollMetrics.canScroll then
+        scrollBarData.track.layout.props.visible = false
+        scrollBarData.track:update()
+        return
     end
+
+    scrollBarData.track.layout.props.visible = true
+
+    -- Recalculate thumb size in case the host or content size changed
+    -- Thumb gets smaller as total content gets larger
+    local thumbLength = math.min(scrollBarData.thumbLength, scrollMetrics.hostSize)
+
+    -- travelRange is how far the thumb body can move inside the track
+    local travelRange = math.max(0, scrollMetrics.hostSize - thumbLength)
+
+    local scrollFraction = 0
+
+    if scrollMetrics.scrollRange > 0 then
+        -- currentPos moves from 0 to a negative minPos as the content scrolls
+        -- Negating currentPos turns it into a position progress value
+        -- Dividing by scrollRange converts it into a 0.0 to 1.0 fraction (0.0 = top/start, 1.0 = bottom/end)
+        scrollFraction = (-scrollMetrics.currentPos) / scrollMetrics.scrollRange
+    end
+
+    -- Convert scroll progress from 0.0-1.0 fraction into a pixel offset
+    local thumbPos = math.floor(travelRange * scrollFraction)
+
+    if scrollMetrics.isHorizontal then
+        scrollBarData.track.layout.props.size = v2(scrollMetrics.hostSize, scrollBarData.thickness)
+        scrollBarData.thumb.layout.props.size = HORIZONTAL_THUMB_SIZE
+        scrollBarData.thumb.layout.props.position = v2(thumbPos, 0)
+    else
+        scrollBarData.track.layout.props.size = v2(scrollBarData.thickness, scrollMetrics.hostSize)
+        scrollBarData.thumb.layout.props.size = v2(scrollBarData.thickness, thumbLength)
+        -- Offset the body by the top cap height so the full visual thumb, including both caps, stays inside the track
+        scrollBarData.thumb.layout.props.position = v2(0, thumbPos)
+    end
+
+    scrollBarData.thumb.layout.props.resource = getThumbTexture(scrollMetrics.isHorizontal)
+
+    if scrollBarData.thumbTop and scrollBarData.thumbBottom then
+        scrollBarData.thumbTop.layout.props.visible = true -- Only add the caps if its a vertical scroll bar
+        scrollBarData.thumbBottom.layout.props.visible = true
+
+        scrollBarData.thumbTop.layout.props.size = v2(scrollBarData.thickness, VERTICAL_THUMB_CAP_HEIGHT) -- Set their size
+        scrollBarData.thumbBottom.layout.props.size = v2(scrollBarData.thickness, VERTICAL_THUMB_CAP_HEIGHT)
+
+        scrollBarData.thumbTop:update()
+        scrollBarData.thumbBottom:update()
+    end
+
+    scrollBarData.thumb:update()
+    scrollBarData.track:update()
 end
 
 -- Function called for mouse wheel behavior in the page list
-local function pageListScroll(direction)
-    if not scrollableWindow then return end -- scrollableWindow can become nil between frames
-    local elemCurrentPos = scrollableWindow.layout.props.position -- get our element's position as a v2
+---@param direction number
+local function scrollElem(direction)
+    if not scrollableWindow or not scrollableWindow.layout then return end -- scrollableWindow can become nil between frames
+    if not hostElem or not hostElem.layout then return end
+    if not scrollContentSize then return end
 
-    if direction > 0 and elemCurrentPos.y >= 0 then -- scrolling up; if its at 0 we don't want it to go 'up' any more
+    local scrollMetrics = getScrollMetrics(scrollableWindow, hostElem, scrollContentSize)
+    if not scrollMetrics then
+        print('[OTK - ERR] OTKTavernMenu.scrollElem: Failed to get scroll metrics!')
         return
-    elseif direction < 0 then -- scrolling down
-        local pageListLength = (64 * #pageList) -- each page button is 64 pixels
-        local parentLength = 368 -- length of our parent widget element
-
-        if pageListLength < parentLength then return end -- Don't scroll if the page list isn't longer than the element
-
-        local heightDifference = pageListLength - parentLength -- Get the difference between the two elements length
-        if elemCurrentPos.y <= (heightDifference * -1) then -- Don't allow the user to scroll if there is no room to (convert heightDifference to -1 for going 'down')
-            return
-        end
     end
 
-    -- Scroll the window
-    scrollableWindow.layout.props.position = v2(elemCurrentPos.x, elemCurrentPos.y + direction)
+    if not scrollMetrics.canScroll then return end -- Not enough elements to need scrolling
+
+    -- Clamp the attempted new position so the flex stays inside its legal range:
+    -- 0                    = fully at the start/top
+    -- scrollMetrics.minPos = fully at the end/bottom (usually negative)
+    local newPos = math.max(scrollMetrics.minPos, math.min(0, scrollMetrics.currentPos + direction))
+
+    if scrollMetrics.isHorizontal then
+        scrollableWindow.layout.props.position = v2(newPos, scrollMetrics.flexPos.y)
+    else
+        scrollableWindow.layout.props.position = v2(scrollMetrics.flexPos.x, newPos)
+    end
+
     scrollableWindow:update()
+    updateScrollBar(scrollableWindow)
 end
 
 -- Function used for exit button mouse logic
+---@param elem any -- UI element
+---@param texturePath string
+---@param shouldClose boolean
 local function exitButtonLogic(elem, texturePath, shouldClose)
     elem.layout.props.resource = getTexture(texturePath)
     elem:update()
     if shouldClose then
         closeMenu()
     end
-end
-
--- Helper function to add a scroll bar
-local function pageListScrollBar(rootFlex, compareWidget)
-    if not rootFlex then return end
-    if not compareWidget then return end
-
-    local pageListLength = (64 * #pageList) -- Each page is 64 pixels
-    local compareLength = compareWidget.layout.props.size.y -- Get the length (Y) of the compared widget
-
-    if pageListLength < compareLength then return end -- There are not enough pages for a scroll bar
-
-    local elemDifference = pageListLength - compareLength -- Get the difference between the two elements
-    local scrollBarSize = compareLength - elemDifference -- Gets the scrollbar size from parent length - the elements difference
-
-    -- Creates the widget to hold our scroll bar
-    local scrollBarWidget = ui.create {
-        name = 'scrollBarWidget',
-        type = ui.TYPE.Widget,
-        template = MWUI.templates.borders,
-        props = {
-            size = v2(32, compareLength),
-        },
-        content = ui.content {},
-        events = {},
-    }
-    rootFlex.layout.content:insert(1, scrollBarWidget) -- Inserts the scroll bar to the left
-
-    -- Creates the actual scroll bar
-    local pageScrollBar = ui.create {
-        name = 'pageScrollBar',
-        type = ui.TYPE.Image,
-        props = {
-            size = v2(32, scrollBarSize),
-            resource = ui.texture { path = 'textures/menu_scroll_bar_vert.dds' }
-        },
-        content = ui.content {},
-        events = {},
-    }
-    scrollBarWidget.layout.content:add(pageScrollBar)
-
-    --rootFlex:update()
 end
 
 -- Called to construct the menu
@@ -329,7 +698,7 @@ local function buildMenu()
         props = {
             visible = false,
             anchor = v2(0.5, 0.5), -- Element anchors on its own center instead of top-left corner
-            relativePosition = v2(0.5, 0.5), -- Halfway across and down
+            position = v2(screenSize.x / 2, screenSize.y / 2), -- Halfway across and down
         },
         content = ui.content {},
     }
@@ -364,12 +733,11 @@ local function buildMenu()
     topBarWidget.layout.events = {
         mouseMove = async:callback(function (event)
             if event.button ~= 1 then return end -- Checks for left click
+            local mousePos = event.position
+            local newPos = mousePos + v2(rootSize.x, rootSize.y * 0.8) -- Offsets the position; a rough approximation
 
             onFrameFunctions[topBarWidget.layout.name..'_mouseMove'] = function ()
-                local mousePos = event.position
-                local mouseOffset = event.offset
-
-                rootContainer.layout.props.position = mouseOffset
+                rootContainer.layout.props.position = newPos
                 rootContainer:update()
             end
         end)
@@ -448,7 +816,7 @@ local function buildMenu()
 
     topBarWidget.layout.content:add(exitButton)
 
-    -- This is the horizontal flex for the page list and page content
+    -- This is the root horizontal flex of our UI
     local rootHorizontalFlex = ui.create {
         name = 'rootHorizontalFlex',
         type = ui.TYPE.Flex,
@@ -485,7 +853,7 @@ local function buildMenu()
     local titleBoxWidget = ui.create {
         name = 'titleBoxWidget',
         type = ui.TYPE.Widget,
-        --template = MWUI.templates.borders,
+        template = MWUI.templates.borders,
         props = {
             size = v2(rootSize.x, (rootSize.y / 3)), -- Width is rootSize, height is 1/3 of rootSize
             anchor = v2(0.5, 0.5),
@@ -537,7 +905,7 @@ local function buildMenu()
     local pageListContainer = ui.create {
         name = 'pageListContainer',
         type = ui.TYPE.Container,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {},
         content = ui.content {},
     }
@@ -547,9 +915,9 @@ local function buildMenu()
     local pageListHorizontalFlex = ui.create {
         name = 'pageListHorizontalFlex',
         type = ui.TYPE.Flex,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {
-            relativeSize = v2(1, 1),
+            --relativeSize = v2(1, 1),
             horizontal = true,
         },
         content = ui.content {},
@@ -573,10 +941,8 @@ local function buildMenu()
             size = v2(rootSize.x, rootSize.y),
         },
         content = ui.content {},
+        events = {},
     }
-
-    -- Delay adding to pageListWidget in case scroll bar is needed
-    pageListHorizontalFlex.layout.content:add(pageListWidget)
 
     -- Page List flex so our page list can grow
     local pageListFlex = ui.create {
@@ -584,31 +950,58 @@ local function buildMenu()
         type = ui.TYPE.Flex,
         --template = MWUI.templates.borders,
         props = {
-            relativeSize = v2(1, 1),
+            position = v2(0, 0), -- Must be declared to be used by scroll function
             horizontal = false,
-            position = v2(0, 0),
         },
         content = ui.content {},
         events = {},
     }
-    pageListWidget.layout.content:add(pageListFlex)
+
+    -- pageListWidget events are declared after pageListFlex so we can reference it
+    pageListWidget.layout.events = {
+        focusGain = async:callback(function ()
+            if scrollableWindow == nil then
+                onFrameFunctions['pageList_focusGain'] = function ()
+                    setScrollTarget(pageListFlex, pageListWidget, getPageListSize())
+                end
+            end
+        end)
+    }
+
+    pageListHorizontalFlex.layout.content:add(pageListWidget)
 
     -- Catches our mouse between page buttons
     pageListFlex.layout.events = {
         focusGain = async:callback(function ()
-            scrollableWindow = pageListFlex
+            if scrollableWindow == nil then
+                onFrameFunctions['pageList_focusGain'] = function ()
+                    setScrollTarget(pageListFlex, pageListWidget, getPageListSize())
+                end
+            end
         end),
         focusLoss = async:callback(function ()
-            scrollableWindow = pageListFlex
+            -- Probably nothing here, since we don't want it to lose scroll focus in the small pixels between buttons
         end),
     }
 
+    pageListWidget.layout.content:add(pageListFlex)
+
     -- Load our Page modules
     loadPageFiles()
-    buildPageList(screenSize, pageListFlex)
 
     -- Calls for our scroll bar function for the page list
-    pageListScrollBar(pageListHorizontalFlex, pageListWidget)
+    addScrollBar(
+        pageListScrollbarContainer,
+        pageListFlex,
+        pageListWidget,
+        getPageListSize(),
+        {
+            namePrefix = 'pageList',
+        }
+    )
+
+    buildPageList(pageListFlex, pageListWidget)
+    updateScrollBar(pageListFlex)
 
     -- Container for our Page Content to hold elements
     local pageContentContainer = ui.create {
@@ -640,7 +1033,7 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         props = {
             anchor = v2(0.5, 0.5),
-            size = v2(571, 108), -- twice as wide as the title box
+            size = v2((rootSize.x * 1.5), (rootSize.y / 3)), -- twice as wide as the title box
         },
         content = ui.content {},
     }
@@ -750,17 +1143,19 @@ local function onFrame(dt)
 end
 
 -- Mouse wheel behavior
-local function onMouseWheel(direction)
+local function onMouseWheel(vertical, horizontal)
     if not isRootVisible() or not scrollableWindow then return end -- Only in our UI; only in a scrollable window
-    direction = direction * 5 -- Increases the scroll speed
 
-    local currentElemName = scrollableWindow.layout.name -- Used for onFrameFunctions key
-
-    -- page list scroll behavior
-    if currentElemName == 'pageListFlex' then
-        onFrameFunctions[currentElemName..'_scrolled'] = pageListScroll(direction)
+    local direction = vertical -- prefer vertical
+    if direction == 0 then
+        direction = horizontal -- fallback to horizontal (uncommon but possible)
     end
 
+    direction = direction * 10
+
+    onFrameFunctions['scroll_elem'] = function ()
+        scrollElem(direction)
+    end
 end
 
 local function onLoad()

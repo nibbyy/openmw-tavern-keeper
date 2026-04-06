@@ -1,9 +1,8 @@
 otk_mod_name: OpenMW Tavern Keeper
 otk_mod_description: |
- Version 0.2
  Created by nibby
  
-otk_mod_version: Version 0.2b
+otk_mod_version: Version 0.2 - 'Alpha'
 
 error_text: (OTK - ERROR) Report this to nibby (developer) - 
 warn_text: (OTK - WARNING) - 
