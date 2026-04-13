@@ -18,31 +18,44 @@ local v2 = util.vector2
 local MWUI = interfaces.MWUI
 
 -- Require our helper scripts
-local colorGetter = require('scripts.nibby.otk.menu.OTKColorGetter')
-local splashList = require('scripts.nibby.otk.menu.OTKSubtitleSplashes')
-
--- Page variables
-local pageFilePath = 'scripts/nibby/otk/menu/pages/'
-local pageList = {}
-local pageCount = 0
-
--- Art asset shorthands
-local morrowindGold = util.color.rgb(0.792157, 0.647059, 0.376471)
-local morrowindLight = util.color.rgb(0.87451, 0.788235, 0.623529)
-local colorBlack = util.color.rgb(0, 0, 0)
-local whiteTexture = constants.whiteTexture
+local colorGetter = require('scripts.nibby.otk.menu.modules.OTKColorGetter')
+local splashList = require('scripts.nibby.otk.menu.modules.OTKSubtitleSplashes')
 
 -- UI Variable storage; these are generally called early to be checked or used by other functions
-local rootContainer -- Declared early for 'if' statement checks
-local subtitleText -- Declare early for random changing in openMenu()
-local pageButtonSize = 52 -- The size of our page buttons
+local OTKUI = {
+    constants = { -- UI visual constants
+        PAGE_BUTTON_SIZE = 64,
+        VERTICAL_SCROLLBAR_THICKNESS = 8,
+        HORIZONTAL_SCROLLBAR_THICKNESS = 16,
+        VERTICAL_THUMB_SIZE = v2(4, 64),
+        HORIZONTAL_THUMB_SIZE = v2(16, 16),
+        VERTICAL_THUMB_CAP_HEIGHT = 4,
+    },
+    elems = { -- Declared early for reassignment & checking
+        rootWidget = nil,
+        --rootContainer = nil,
+        subtitleText = nil,
+    },
+    pages = {
+        pageFilePath = 'scripts/nibby/otk/menu/pages/',
+        list = {},
+        count = 0,
+    },
+    art = {
+        morrowindGold = util.color.rgb(0.792157, 0.647059, 0.376471),
+        morrowindLight = util.color.rgb(0.87451, 0.788235, 0.623529),
+        colorBlack = util.color.rgb(0, 0, 0),
+        whiteTexture = constants.whiteTexture,
+    }
+}
 
--- Scroll bar constants
-local VERTICAL_SCROLLBAR_THICKNESS = 8
-local HORIZONTAL_SCROLLBAR_THICKNESS = 16
-local VERTICAL_THUMB_SIZE = v2(4, 64)
-local HORIZONTAL_THUMB_SIZE = v2(16, 16)
-local VERTICAL_THUMB_CAP_HEIGHT = 4
+--[[
+    #####
+
+    HELPERS
+
+    #####
+]]--
 
 ---@type table<string, fun(dt?: number)>
 local onFrameFunctions = {} -- Used for button functions to call onFrame
@@ -50,13 +63,14 @@ local onFrameFunctions = {} -- Used for button functions to call onFrame
 -- Helper function for checking if the Root element is visible
 ---@return boolean -- True if the menu is open
 local function isRootVisible()
-    return rootContainer and rootContainer.layout.props.visible ~= false
+    if not OTKUI.elems.rootWidget then return false end
+    return OTKUI.elems.rootWidget.layout.props.visible ~= false
 end
 
 -- Helper function for finding the length of the page list
 ---@return integer -- UI pixel size of the page list
 local function getPageListSize()
-    return pageButtonSize * pageCount
+    return OTKUI.constants.PAGE_BUTTON_SIZE * OTKUI.pages.count
 end
 
 local textureCache = {}
@@ -85,8 +99,8 @@ local function closeMenu()
     interfaces.UI.setMode() -- Re-locks the mouse
 
     print('[OTK] OTKTavernMenu: Closing the Tavern Menu')
-    rootContainer.layout.props.visible = false -- Closes the menu
-    rootContainer:update()
+    OTKUI.elems.rootWidget.layout.props.visible = false -- Closes the menu
+    OTKUI.elems.rootWidget:update()
 end
 
 -- Called by other scripts to add functions to onFrameFunctions
@@ -98,9 +112,22 @@ local function addOnFrameFunction(key, func)
     onFrameFunctions[key] = func
 end
 
+local function subPageText(content)
+    if type(content) ~= 'string' then
+        print('[OTK - ERR] OTKTavernMenu.subPageText expected Subpage Content String, got: ' .. tostring(type(content)))
+        return
+    end
+end
+
+local function registerSubPage(subPage)
+    if type(subPage) ~= 'table' then
+        print('[OTK - ERR] OTKTavernMenu.registerSubPage expected Subpage Table, got: ' .. tostring(type(subPage)))
+    end
+end
+
 ---@class TavernPage
 ---@field name string -- Returned name string from module
----@field text string -- Returned text string from module
+---@field label string -- Returned text string from module
 ---@field index integer -- Returned index integer from module
 
 -- Registers our pages by information from their .lua module
@@ -116,8 +143,8 @@ local function registerPage(page)
         return
     end
 
-    if type(page.text) ~= 'string' or page.text == '' then
-        print('[OTK - ERR] OTKTavernMenu.registerPage: page.text must be a non-empty string in page: ' .. tostring(page.name))
+    if type(page.label) ~= 'string' or page.label == '' then
+        print('[OTK - ERR] OTKTavernMenu.registerPage: page.label must be a non-empty string in page: ' .. tostring(page.name))
         return
     end
 
@@ -126,10 +153,10 @@ local function registerPage(page)
         return
     end
 
-    if pageList[page.index] == nil then
-        pageList[page.index] = page
-        if page.index > pageCount then
-            pageCount = page.index
+    if OTKUI.pages.list[page.index] == nil then
+        OTKUI.pages.list[page.index] = page
+        if page.index > OTKUI.pages.count then
+            OTKUI.pages.count = page.index
         end
     else
         print('[OTK - ERR] OTKTavernMenu.registerPage: Page: ' ..tostring(page.name) .. ' tried to claim Page Index that was already taken: ' ..tostring(page.index))
@@ -146,10 +173,10 @@ end
 
 -- Function called to load Page .lua files
 local function loadPageFiles()
-    pageList = {}
-    pageCount = 0
+    OTKUI.pages.list = {}
+    OTKUI.pages.count = 0
 
-    for fileName in vfs.pathsWithPrefix(pageFilePath) do
+    for fileName in vfs.pathsWithPrefix(OTKUI.pages.pageFilePath) do
         if fileName:match('%.lua$') then
             local moduleName = pathToModuleName(fileName)
 
@@ -164,7 +191,7 @@ local function loadPageFiles()
     end
 end
 
--- Helper function to determine our scroll bar thumb texture
+-- Helper function to determine our scroll bar thumb texture (vertical/horizontal)
 ---@param isHorizontal boolean
 ---@return any ui.texture
 local function getThumbTexture(isHorizontal)
@@ -184,7 +211,7 @@ local function addThumbCaps(thumbElem, thickness)
         type = ui.TYPE.Image,
         name = thumbElem.layout.name .. '_topCap',
         props = {
-            size = v2(thickness, VERTICAL_THUMB_CAP_HEIGHT),
+            size = v2(thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT),
             anchor = v2(0.5, 0),
             relativePosition = v2(0.5, 0),
             resource = getTexture('textures/menu_scroll_button_top.dds'),
@@ -195,7 +222,7 @@ local function addThumbCaps(thumbElem, thickness)
         type = ui.TYPE.Image,
         name = thumbElem.layout.name .. '_bottomCap',
         props = {
-            size = v2(thickness, VERTICAL_THUMB_CAP_HEIGHT),
+            size = v2(thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT),
             anchor = v2(0.5, 1),
             relativePosition = v2(0.5, 1),
             resource = getTexture('textures/menu_scroll_button_bottom.dds'),
@@ -234,7 +261,7 @@ local scrollContentSize = nil
 ---@field canScroll boolean
 ---@field minPos number
 ---@field scrollRange number
----@field flexPos any -- util.vector2
+---@field flexPos any util.vector2
 
 -- Function for getting our scroll metrics
 ---@param flexElem any -- UI element
@@ -329,8 +356,8 @@ local function buildPageList(pageFlex, pageListHost)
     local pageWidth = pageListHost.layout.props.size.x
 
     -- Iterate through the page list
-    for i = 1, pageCount do
-        local page = pageList[i]
+    for i = 1, OTKUI.pages.count do
+        local page = OTKUI.pages.list[i]
         if page then
             local pageWidget = ui.create {
                 type = ui.TYPE.Widget,
@@ -338,8 +365,8 @@ local function buildPageList(pageFlex, pageListHost)
                 template = MWUI.templates.borders,
                 props = {
                     anchor = v2(0.5, 0.5),
-                    size = v2(pageWidth, pageButtonSize),
-                    relativePosition = v2(0.5, 0.5),
+                    size = v2(pageWidth, OTKUI.constants.PAGE_BUTTON_SIZE),
+                    --relativePosition = v2(0.5, 0.5),
                 },
                 content = ui.content {},
             }
@@ -352,9 +379,9 @@ local function buildPageList(pageFlex, pageListHost)
                     anchor = v2(0.5, 0.5),
                     relativePosition = v2(0.5, 0.5),
                     relativeSize = v2(1, 1),
-                    resource = whiteTexture,
-                    alpha = 0,
-                    color = colorBlack,
+                    resource = OTKUI.art.whiteTexture,
+                    alpha = 0.4,
+                    color = OTKUI.art.colorBlack,
                 },
                 events = {},
                 content = ui.content {},
@@ -364,11 +391,11 @@ local function buildPageList(pageFlex, pageListHost)
                 type = ui.TYPE.Text,
                 name = page.name..'_pageButton_text',
                 props = {
-                    text = page.text,
+                    text = page.label,
                     textSize = 18,
                     textColor = colorGetter.normal,
                     textShadow = true,
-                    textShadowColor = colorBlack,
+                    textShadowColor = OTKUI.art.colorBlack,
                     anchor = v2(0.5, 0.5),
                     relativePosition = v2(0.5, 0.5),
                 }
@@ -396,8 +423,8 @@ local function buildPageList(pageFlex, pageListHost)
                         if scrollableWindow == nil then
                             setScrollTarget(pageFlex, pageListHost, getPageListSize())
                         end
-                        pageBackground.layout.props.alpha = 0.4
-                        pageBackground.layout.props.color = darkenColor(morrowindGold, 0.4)
+                        pageBackground.layout.props.alpha = 0.6
+                        pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.4)
                         pageBackground:update()
                     end
                 end),
@@ -406,16 +433,16 @@ local function buildPageList(pageFlex, pageListHost)
                         if scrollableWindow ~= nil then
                             clearScrollTarget(pageFlex)
                         end
-                        pageBackground.layout.props.alpha = 0
-                        pageBackground.layout.props.color = colorBlack
+                        pageBackground.layout.props.alpha = 0.4
+                        pageBackground.layout.props.color = OTKUI.art.colorBlack
                         pageBackground:update()
                     end
                 end),
                 mousePress = async:callback(function (event)
                     if event.button == 1 then
                         onFrameFunctions[page.name..'_mousePress'] = function ()
-                            pageBackground.layout.props.alpha = 0.8
-                            pageBackground.layout.props.color = darkenColor(morrowindGold, 0.8)
+                            pageBackground.layout.props.alpha = 0.9
+                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.9)
                             pageBackground:update()
                         end
                     end
@@ -423,8 +450,8 @@ local function buildPageList(pageFlex, pageListHost)
                 mouseRelease = async:callback(function (event)
                     if event.button == 1 then
                         onFrameFunctions[page.name..'_mouseRelease'] = function ()
-                            pageBackground.layout.props.alpha = 0.6
-                            pageBackground.layout.props.color = darkenColor(morrowindGold, 0.6)
+                            pageBackground.layout.props.alpha = 0.7
+                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.7)
                             pageBackground:update()
                         end
                     end
@@ -486,7 +513,7 @@ local function addScrollBar(scrollBarHost, flexElem, flexHost, contentSize, opti
 
     options = options or {}
 
-    local thickness = scrollMetrics.isHorizontal and HORIZONTAL_SCROLLBAR_THICKNESS or VERTICAL_SCROLLBAR_THICKNESS -- The width (for vertical) or height (for horizontal) of the track/thumb
+    local thickness = scrollMetrics.isHorizontal and OTKUI.constants.HORIZONTAL_SCROLLBAR_THICKNESS or OTKUI.constants.VERTICAL_SCROLLBAR_THICKNESS -- The width (for vertical) or height (for horizontal) of the track/thumb
 
     local namePrefix = options.namePrefix or (flexElem.layout.name or 'scroll')
 
@@ -503,11 +530,11 @@ local function addScrollBar(scrollBarHost, flexElem, flexHost, contentSize, opti
 
     if scrollMetrics.isHorizontal then
         trackSize = v2(scrollMetrics.hostSize, thickness)
-        thumbLength = math.min(HORIZONTAL_THUMB_SIZE.x, scrollMetrics.hostSize)
+        thumbLength = math.min(OTKUI.constants.HORIZONTAL_THUMB_SIZE.x, scrollMetrics.hostSize)
         thumbSize = v2(thickness, thickness)
     else
         trackSize = v2(thickness, scrollMetrics.hostSize)
-        thumbLength = math.min(VERTICAL_THUMB_SIZE.y, math.max(0, scrollMetrics.hostSize - (VERTICAL_THUMB_CAP_HEIGHT * 2)))
+        thumbLength = math.min(OTKUI.constants.VERTICAL_THUMB_SIZE.y, math.max(0, scrollMetrics.hostSize - (OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT * 2)))
         thumbSize = v2(thickness, thumbLength)
     end
 
@@ -548,7 +575,9 @@ local function addScrollBar(scrollBarHost, flexElem, flexHost, contentSize, opti
     local thumbBottom = nil
 
     if not scrollMetrics.isHorizontal then
-        thumbTop, thumbBottom = addThumbCaps(scrollBarThumb, thickness)
+        -- Adds Thumb tops and bottoms to vertical scroll bars
+        -- Disabled for now because it looks ugly and is unnecessary
+        --thumbTop, thumbBottom = addThumbCaps(scrollBarThumb, thickness)
     end
 
     scrollBarWidget.layout.content:add(scrollBarThumb)
@@ -609,7 +638,7 @@ local function updateScrollBar(flexElem)
 
     if scrollMetrics.isHorizontal then
         scrollBarData.track.layout.props.size = v2(scrollMetrics.hostSize, scrollBarData.thickness)
-        scrollBarData.thumb.layout.props.size = HORIZONTAL_THUMB_SIZE
+        scrollBarData.thumb.layout.props.size = OTKUI.constants.HORIZONTAL_THUMB_SIZE
         scrollBarData.thumb.layout.props.position = v2(thumbPos, 0)
     else
         scrollBarData.track.layout.props.size = v2(scrollBarData.thickness, scrollMetrics.hostSize)
@@ -624,8 +653,8 @@ local function updateScrollBar(flexElem)
         scrollBarData.thumbTop.layout.props.visible = true -- Only add the caps if its a vertical scroll bar
         scrollBarData.thumbBottom.layout.props.visible = true
 
-        scrollBarData.thumbTop.layout.props.size = v2(scrollBarData.thickness, VERTICAL_THUMB_CAP_HEIGHT) -- Set their size
-        scrollBarData.thumbBottom.layout.props.size = v2(scrollBarData.thickness, VERTICAL_THUMB_CAP_HEIGHT)
+        scrollBarData.thumbTop.layout.props.size = v2(scrollBarData.thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT) -- Set their size
+        scrollBarData.thumbBottom.layout.props.size = v2(scrollBarData.thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT)
 
         scrollBarData.thumbTop:update()
         scrollBarData.thumbBottom:update()
@@ -683,26 +712,36 @@ local function buildMenu()
 
     -- Variables used to scale assets by screen size
     local screenSize = ui.layers[2].size
-    local rootSize = v2(screenSize.x * 0.2, screenSize.y * 0.3) -- Defines our root widget size
-    --local screenScale = math.min(screenSize.x / 1920, screenSize.y / 1080) -- Should be applied to all pixel-based sized elements
+    local rootSize = v2(screenSize.x * 0.5, screenSize.y * 0.7) -- Defines our root widget size
 
     -- Lets us easily add spacing to elements ui.content{} for spacing
     local paddingSpacer = { props = { size = (v2(5, 5)) } }
 
-    -- Root element, from which the entire UI is built. We also use it for 'if' statements
-    rootContainer = ui.create {
-        name = 'rootContainer',
-        type = ui.TYPE.Container,
+    OTKUI.elems.rootWidget = ui.create {
+        name = 'rootWidget',
+        type = ui.TYPE.Widget,
         layer = 'Windows',
-        template = MWUI.templates.boxTransparentThick, -- Thick Borders with transparent background
+        --template = MWUI.templates.bordersThick,
         props = {
             visible = false,
-            anchor = v2(0.5, 0.5), -- Element anchors on its own center instead of top-left corner
-            position = v2(screenSize.x / 2, screenSize.y / 2), -- Halfway across and down
+            size = rootSize * 1.3,
+            anchor = v2(0.5, 0.5),
+            position = v2(screenSize.x / 2, screenSize.y / 2),
         },
         content = ui.content {},
     }
-    rootContainer.layout.content:add(paddingSpacer)
+
+    local rootBackground = ui.create {
+        name = 'rootBackground',
+        type = ui.TYPE.Image,
+        props = {
+            relativeSize = v2(1, 1),
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(0.5, 0.5),
+            resource = getTexture('textures/nibby/scroll.dds')
+        },
+    }
+    OTKUI.elems.rootWidget.layout.content:add(rootBackground)
 
     -- Root Vertical Flex, which will allow the UI to grow vertically
     local rootVerticalFlex = ui.create {
@@ -713,13 +752,13 @@ local function buildMenu()
         },
         content = ui.content {},
     }
-    rootContainer.layout.content:add(rootVerticalFlex)
+    OTKUI.elems.rootWidget.layout.content:add(rootVerticalFlex)
 
     -- Top Bar to hold our Back, Forward and Exit buttons
     local topBarWidget = ui.create {
         name = 'topBarWidget',
         type = ui.TYPE.Widget,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {
             size = v2(rootSize.x, 48), -- width is rootSize, height is size of exit button asset
             anchor = v2(0.5, 0.5),
@@ -737,8 +776,8 @@ local function buildMenu()
             local newPos = mousePos + v2(rootSize.x, rootSize.y * 0.8) -- Offsets the position; a rough approximation
 
             onFrameFunctions[topBarWidget.layout.name..'_mouseMove'] = function ()
-                rootContainer.layout.props.position = newPos
-                rootContainer:update()
+                OTKUI.elems.rootWidget.layout.props.position = newPos
+                OTKUI.elems.rootWidget:update()
             end
         end)
     }
@@ -816,8 +855,10 @@ local function buildMenu()
 
     topBarWidget.layout.content:add(exitButton)
 
-    -- This is the root horizontal flex of our UI
-    local rootHorizontalFlex = ui.create {
+    rootVerticalFlex.layout.content:add(paddingSpacer)
+
+    -- Top row for title and tavern log
+    local topHorizontalFlex = ui.create {
         name = 'rootHorizontalFlex',
         type = ui.TYPE.Flex,
         props = {
@@ -825,29 +866,7 @@ local function buildMenu()
         },
         content = ui.content {},
     }
-    rootVerticalFlex.layout.content:add(rootHorizontalFlex)
-
-    -- Left-side Column will hold our Title and Page List
-    local leftColumnContainer = ui.create {
-        name = 'mainColumnContainer',
-        type = ui.TYPE.Container,
-        props = {
-            anchor = v2(0.5, 0.5),
-        },
-        content = ui.content {},
-    }
-    rootHorizontalFlex.layout.content:add(leftColumnContainer)
-
-    -- Flex which allows our left-side column to grow
-    local leftColumnFlex = ui.create {
-        name = 'mainColumnFlex',
-        type = ui.TYPE.Flex,
-        props = {
-            horizontal = false,
-        },
-        content = ui.content {},
-    }
-    leftColumnContainer.layout.content:add(leftColumnFlex)
+    rootVerticalFlex.layout.content:add(topHorizontalFlex)
 
     -- Widget to hold the Title and Subtitle
     local titleBoxWidget = ui.create {
@@ -855,13 +874,29 @@ local function buildMenu()
         type = ui.TYPE.Widget,
         template = MWUI.templates.borders,
         props = {
-            size = v2(rootSize.x, (rootSize.y / 3)), -- Width is rootSize, height is 1/3 of rootSize
+            size = v2(rootSize.x / 2, (rootSize.y / 3)), -- Width is rootSize, height is 1/3 of rootSize
             anchor = v2(0.5, 0.5),
             relativePosition = v2(0.5, 0.5),
         },
         content = ui.content {},
     }
-    leftColumnFlex.layout.content:add(titleBoxWidget) -- Gets added to left-side column
+    topHorizontalFlex.layout.content:add(titleBoxWidget) -- Gets added to left-side column
+
+    local titleBoxBackground = ui.create {
+        name = 'titleBoxBackground',
+        type = ui.TYPE.Image,
+        props = {
+            inheritAlpha = false,
+            relativePosition = v2(0.5, 0.5),
+            anchor = v2(0.5, 0.5),
+            relativeSize = v2(1, 1),
+            resource = OTKUI.art.whiteTexture,
+            color = OTKUI.art.colorBlack,
+            alpha = 0.6,
+        },
+        content = ui.content {},
+    }
+    titleBoxWidget.layout.content:add(titleBoxBackground)
 
     -- Title Text above our Page List
     local titleText = ui.create {
@@ -870,9 +905,9 @@ local function buildMenu()
         props = {
             text = modLocale('tavern_menu_title', {}),
             textSize = 22,
-            textColor = morrowindGold,
+            textColor = OTKUI.art.morrowindGold,
             textShadow = true,
-            textShadowColor = colorBlack,
+            textShadowColor = OTKUI.art.colorBlack,
             textAlignH = ui.ALIGNMENT.Center,
             textAlignV = ui.ALIGNMENT.Center,
             anchor = v2(0.5, 0.5),
@@ -883,15 +918,15 @@ local function buildMenu()
     titleBoxWidget.layout.content:add(titleText)
 
     -- Subtitle Text below the Title Text
-    subtitleText = ui.create {
+    OTKUI.elems.subtitleText = ui.create {
         type = ui.TYPE.Text,
         name = 'subtitleText',
         props = {
             text = '',
             textSize = 18,
-            textColor = morrowindLight,
+            textColor = OTKUI.art.morrowindLight,
             textShadow = true,
-            textShadowColor = colorBlack,
+            textShadowColor = OTKUI.art.colorBlack,
             textAlignH = ui.ALIGNMENT.Center,
             textAlignV = ui.ALIGNMENT.Center,
             anchor = v2(0.5, 0.5),
@@ -899,20 +934,83 @@ local function buildMenu()
             position = v2(0, ((rootSize.y / 3) / 5)) -- Brings it down 1/5 of the box's height
         }
     }
-    titleBoxWidget.layout.content:add(subtitleText)
+    titleBoxWidget.layout.content:add(OTKUI.elems.subtitleText)
 
-    -- Page List Container wraps around the page list
-    local pageListContainer = ui.create {
-        name = 'pageListContainer',
-        type = ui.TYPE.Container,
-        --template = MWUI.templates.borders,
-        props = {},
+    topHorizontalFlex.layout.content:add(paddingSpacer)
+
+    local logWidget = ui.create {
+        name = 'logWidget',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
+        props = {
+            size = v2((rootSize.x / 2), rootSize.y / 3),
+        },
         content = ui.content {},
     }
-    leftColumnFlex.layout.content:add(pageListContainer)
+    topHorizontalFlex.layout.content:add(logWidget)
+
+    local logBackground = ui.create {
+        name = 'logBackground',
+        type = ui.TYPE.Image,
+        props = {
+            inheritAlpha = false,
+            relativePosition = v2(0.5, 0.5),
+            relativeSize = v2(1, 1),
+            anchor = v2(0.5, 0.5),
+            resource = OTKUI.art.whiteTexture,
+            color = OTKUI.art.colorBlack,
+            alpha = 0.6,
+        },
+        content = ui.content {},
+    }
+    logWidget.layout.content:add(logBackground)
+
+    -- Page Description text
+    local logText = ui.create {
+        name = 'logText',
+        type = ui.TYPE.Text,
+        props = {
+            --anchor = v2(0.5, 0.5),
+            text = "Tavern Log Here",
+            textSize = 18,
+            textColor = OTKUI.art.morrowindLight,
+            textShadow = true,
+            textShadowColor = OTKUI.art.colorBlack,
+            textAlignH = ui.ALIGNMENT.Start,
+            textAlignV = ui.ALIGNMENT.Start,
+        },
+    }
+    logWidget.layout.content:add(logText)
+
+    rootVerticalFlex.layout.content:add(paddingSpacer)
+
+    -- Horizontal flex for our page list and page content
+    local pageHorizontalFlex = ui.create {
+        name = 'pageHorizontalFlex',
+        type = ui.TYPE.Flex,
+        props = {
+            horizontal = true,
+        },
+        content = ui.content {},
+    }
+    rootVerticalFlex.layout.content:add(pageHorizontalFlex)
+
+    
+    -- Page List widget which limits the size of the page list (so we have to scroll through it)
+    local pageListWidget = ui.create {
+        name = 'pageListWidget',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
+        props = {
+            size = v2(rootSize.x / 3, rootSize.y / 2),
+        },
+        content = ui.content {},
+        events = {},
+    }
+    pageHorizontalFlex.layout.content:add(pageListWidget)
 
     -- Horizontal flex for our page list & scroll bar
-    local pageListHorizontalFlex = ui.create {
+    local pagelistHorizontalFlex = ui.create {
         name = 'pageListHorizontalFlex',
         type = ui.TYPE.Flex,
         --template = MWUI.templates.borders,
@@ -922,27 +1020,17 @@ local function buildMenu()
         },
         content = ui.content {},
     }
-    pageListContainer.layout.content:add(pageListHorizontalFlex)
+    pageListWidget.layout.content:add(pagelistHorizontalFlex)
 
     -- Scrollbar container, which is only given a scrollbar if there are enough pages for one
-    local pageListScrollbarContainer = ui.create {
-        name = 'pageListScrollbarContainer',
-        type = ui.TYPE.Container,
+    -- Needs logic for being added/edited for scrollbar
+    local pageListScrollbarWidget = ui.create {
+        name = 'pageListScrollbarWidget',
+        type = ui.TYPE.Widget,
         props = {},
         content = ui.content {},
     }
-    pageListHorizontalFlex.layout.content:add(pageListScrollbarContainer)
-
-    -- Page List widget which limits the size of the page list (so we have to scroll through it)
-    local pageListWidget = ui.create {
-        name = 'pageListWidget',
-        type = ui.TYPE.Widget,
-        props = {
-            size = v2(rootSize.x, rootSize.y),
-        },
-        content = ui.content {},
-        events = {},
-    }
+    pagelistHorizontalFlex.layout.content:add(pageListScrollbarWidget)
 
     -- Page List flex so our page list can grow
     local pageListFlex = ui.create {
@@ -968,8 +1056,6 @@ local function buildMenu()
         end)
     }
 
-    pageListHorizontalFlex.layout.content:add(pageListWidget)
-
     -- Catches our mouse between page buttons
     pageListFlex.layout.events = {
         focusGain = async:callback(function ()
@@ -978,9 +1064,6 @@ local function buildMenu()
                     setScrollTarget(pageListFlex, pageListWidget, getPageListSize())
                 end
             end
-        end),
-        focusLoss = async:callback(function ()
-            -- Probably nothing here, since we don't want it to lose scroll focus in the small pixels between buttons
         end),
     }
 
@@ -991,7 +1074,7 @@ local function buildMenu()
 
     -- Calls for our scroll bar function for the page list
     addScrollBar(
-        pageListScrollbarContainer,
+        pageListScrollbarWidget,
         pageListFlex,
         pageListWidget,
         getPageListSize(),
@@ -1003,58 +1086,60 @@ local function buildMenu()
     buildPageList(pageListFlex, pageListWidget)
     updateScrollBar(pageListFlex)
 
-    -- Container for our Page Content to hold elements
-    local pageContentContainer = ui.create {
-        name = 'pageContentContainer',
-        type = ui.TYPE.Container,
+    pageHorizontalFlex.layout.content:add(paddingSpacer)
+
+    -- Holds our page content
+    local pageContentHost = ui.create {
+        name = 'pageContentHost',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
         props = {
-            anchor = v2(0.5, 0.5),
+            --anchor = v2(0.5, 0.5),
+            size = v2((rootSize.x / 2), (rootSize.y / 3)),
         },
         content = ui.content {},
     }
-    rootHorizontalFlex.layout.content:add(paddingSpacer)
-    rootHorizontalFlex.layout.content:add(pageContentContainer)
+    pageHorizontalFlex.layout.content:add(pageContentHost)
 
-    -- Flex of our Page Content
     local pageContentFlex = ui.create {
         name = 'pageContentFlex',
         type = ui.TYPE.Flex,
-        template = MWUI.templates.borders,
         props = {
+            relativeSize = v2(1, 1),
             horizontal = false,
-        },
-        content = ui.content {}
-    }
-    pageContentContainer.layout.content:add(pageContentFlex)
-
-    -- Page Description box
-    local pageDescWidget = ui.create {
-        name = 'pageDescWidget',
-        type = ui.TYPE.Widget,
-        props = {
-            anchor = v2(0.5, 0.5),
-            size = v2((rootSize.x * 1.5), (rootSize.y / 3)), -- twice as wide as the title box
         },
         content = ui.content {},
     }
-    pageContentFlex.layout.content:add(pageDescWidget)
+    --pageContentHost.layout.content:add(pageContentFlex)
 
-    -- Page Description text
-    local pageDescText = ui.create {
-        name = 'pageDescText',
-        type = ui.TYPE.Text,
+    local subpageListWidget = ui.create {
+        name = 'subpageListWidget',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
         props = {
-            --anchor = v2(0.5, 0.5),
-            text = "Page Description Here",
-            textSize = 18,
-            textColor = morrowindLight,
-            textShadow = true,
-            textShadowColor = colorBlack,
-            textAlignH = ui.ALIGNMENT.Start,
-            textAlignV = ui.ALIGNMENT.Start,
+            anchor = v2(0.5, 0.5),
+            size = v2(rootSize.x / 2, 32),
         },
+        content = ui.content {},
     }
-    pageDescWidget.layout.content:add(pageDescText)
+    --pageContentFlex.layout.content:add(subpageListWidget)
+
+    local subpageListFlex = ui.create {
+        name = 'subpageListFlex',
+        type = ui.TYPE.Flex,
+        props = {
+            horizontal = true,
+        },
+        content = ui.content {},
+    }
+    --subpageListWidget.layout.content:add(subpageListFlex)
+
+    -- Example of subpage button
+    local subpageExButton = ui.create {
+        name = 'subpageExButton',
+        type = ui.TYPE.Widget,
+        props = {}
+    }
 
     -- The bottom bar, which runs along the bottom of the window
     local bottomBarWidget = ui.create {
@@ -1076,8 +1161,9 @@ local function buildMenu()
         props = {
             text = modLocale('otk_mod_version', {}),
             textSize = 14,
-            textColor = morrowindLight,
-            textShadow = false,
+            textColor = OTKUI.art.morrowindLight,
+            textShadow = true,
+            textShadowColor = OTKUI.art.colorBlack,
             anchor = v2(0, 1), -- Anchors self by top-right corner
             relativePosition = v2(0, 1), -- Anchors to bottom-left corner of title box
             position = v2(7, -4), -- Offsets it by a few pixels
@@ -1096,12 +1182,12 @@ local function openMenu()
 
     -- Assign a random subtitle text
     local randomSplash = math.random(1, #splashList)
-    subtitleText.layout.props.text = splashList[randomSplash]
-    subtitleText:update()
+    OTKUI.elems.subtitleText.layout.props.text = splashList[randomSplash]
+    OTKUI.elems.subtitleText:update()
 
     interfaces.UI.setMode('Interface', { windows = {}, target = self.object }) -- Clears the UI and unlocks the mouse
-    rootContainer.layout.props.visible = true -- Displays the menu
-    rootContainer:update() -- Required any time a UI element is changed
+    OTKUI.elems.rootWidget.layout.props.visible = true -- Displays the menu
+    OTKUI.elems.rootWidget:update() -- Required any time a UI element is changed
 end
 
 -- Function called by Trigger keybind to open/close the menu

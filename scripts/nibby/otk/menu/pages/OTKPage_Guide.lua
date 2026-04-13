@@ -1,5 +1,5 @@
 return {
     name = 'guide',
-    text = 'Guide',
+    label = 'Guide',
     index = 1,
 }

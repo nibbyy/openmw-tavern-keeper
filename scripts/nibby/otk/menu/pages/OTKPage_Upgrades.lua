@@ -1,5 +1,5 @@
 return {
     name = 'upgrades',
-    text = 'Upgrades',
+    label = 'Upgrades',
     index = 4,
 }

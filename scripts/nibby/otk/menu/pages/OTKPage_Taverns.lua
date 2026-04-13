@@ -1,7 +1,5 @@
 return {
     name = 'taverns',
-    text = 'Taverns',
+    label = 'Taverns',
     index = 2,
-    type = 'catalog',
-    content = '',
 }

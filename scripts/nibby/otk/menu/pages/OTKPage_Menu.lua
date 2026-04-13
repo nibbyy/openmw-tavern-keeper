@@ -1,5 +1,5 @@
 return {
     name = 'menu',
-    text = 'Menu',
+    label = 'Menu',
     index = 3,
 }
