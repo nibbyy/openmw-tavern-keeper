@@ -1,0 +1,22 @@
+---
+ # employee page
+ name: "employees"
+ label: "Employees"
+ index: 6
+ subPages:
+  hire:
+   label: "Hire"
+   type: "text"
+   content: |-
+    this is a test
+    to see if multiline
+    works
+  manage:
+   label: "Manage"
+   type: "text"
+   content: |-
+    Here you'll be able to fire your employees
+
+    How exciting!
+
+...

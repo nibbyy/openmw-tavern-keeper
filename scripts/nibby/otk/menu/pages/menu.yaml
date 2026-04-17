@@ -1,0 +1,7 @@
+---
+# menu page
+ name: "menu"
+ label: "Menu"
+ index: 3
+
+...
