@@ -8,14 +8,14 @@
    label: "Hire"
    type: "text"
    content: |-
-    this is a test
-    to see if multiline
-    works
+    This menu will allow you to look at the available employees for hire for the day
+
+    They'll have information attached to them
   manage:
    label: "Manage"
    type: "text"
    content: |-
-    Here you'll be able to fire your employees
+    Here you'll be able to fire your employees, and see their skill levels
 
     How exciting!
 

@@ -3,5 +3,40 @@
  name: "guide"
  label: "Guide"
  index: 1
+ subPages:
+  start:
+   label: "Start"
+   type: "text"
+   content: |-
+    This menu will walk the player through starting the mod
+
+    Or showcase how to use the tavern catalog
+  workers:
+   label: "Workers"
+   type: "text"
+   content: |-
+    This section will explain the employees, and how their skills work
+
+    It will eventually include pictures!
+  drinks:
+   label: "Drinks"
+   type: "text"
+   content: |-
+    This menu will explain how Drinks and Brewing works!
+  food:
+   label: "Food"
+   type: "text"
+   content: |-
+    This menu will explain how Food and Cooking works!
+  building:
+   label: "Building"
+   type: "text"
+   content: |-
+    This menu will explain how Building works!
+  stories:
+   label: "Stories"
+   type: "text"
+   content: |-
+    This menu will explain how Stories work!
 
 ...

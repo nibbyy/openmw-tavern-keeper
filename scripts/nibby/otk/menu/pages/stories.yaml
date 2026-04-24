@@ -3,5 +3,20 @@
  name: "stories"
  label: "Stories"
  index: 5
+ subPages:
+  tales:
+   label: "Tales"
+   type: "text"
+   content: |-
+    Here, you'll see the Tales you've heard
+
+    Later we'll change this to a List
+  rumors:
+   label: "Rumors"
+   type: "text"
+   content: |-
+    Likewise, this page will include the Rumors you've overheard
+
+    Again, it will be changed to a List later
 
 ...

@@ -3,5 +3,20 @@
  name: "stats"
  label: "Stats"
  index: 7
+ subPages:
+  sales:
+   label: "Sales"
+   type: "text"
+   content: |-
+    This menu will eventually be a list of the shop's sales and numbers
+
+    Perhaps in the future I'll try adding graphs for trends
+  drinks:
+   label: "Drinks"
+   type: "text"
+   content: |-
+    Here you'll be able to see the list of Taverns you've purchased
+
+    You can also sell them if you don't want to keep it
 
 ...

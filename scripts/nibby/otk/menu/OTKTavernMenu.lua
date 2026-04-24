@@ -30,6 +30,7 @@ local OTKUI = {
         PAGE_BUTTON_SIZE = 64,
         PAGE_BUTTON_TEXT_SIZE = 18,
         SUBPAGE_BUTTON_TEXT_SIZE = 14,
+        SUBPAGE_CONTENT_TEXT_SIZE = 12,
         VERTICAL_SCROLLBAR_THICKNESS = 8,
         HORIZONTAL_SCROLLBAR_THICKNESS = 16,
         VERTICAL_THUMB_SIZE = v2(4, 64),
@@ -40,6 +41,11 @@ local OTKUI = {
         rootWidget = nil,
         --rootContainer = nil,
         subtitleText = nil,
+        currentPage = nil,
+        currentSubPage = nil,
+        subPageListScrollBarStackWidget = nil,
+        subPageContentStackWidget = nil,
+        subPageContentBaseSize = nil,
     },
     pages = {
         pageFilePath = 'scripts/nibby/otk/menu/pages/',
@@ -76,6 +82,14 @@ end
 ---@return integer -- UI pixel size of the page list
 local function getPageListSize()
     return OTKUI.constants.PAGE_BUTTON_SIZE * OTKUI.pages.count
+end
+
+-- Helper function for finding the width of one Page's subpage list.
+---@param page table
+---@return number
+local function getSubPageListSize(page)
+    if not page or type(page.subPages) ~= 'table' then return 0 end
+    return (page.subPageButtonWidth or 0) * #page.subPages
 end
 
 local textureCache = {}
@@ -117,33 +131,155 @@ local function addOnFrameFunction(key, func)
     onFrameFunctions[key] = func
 end
 
-local function subPageText(content)
-    if type(content) ~= 'string' then
-        print('[OTK - ERR] OTKTavernMenu.subPageText expected Subpage Content String, got: ' .. tostring(type(content)))
-        return
+local function subPageText(subPage)
+    if type(subPage.content) ~= 'string' then
+        print('[OTK - ERR] OTKTavernMenu.subPageText expected Subpage Content String for ' .. tostring(subPage.name) .. ', got: ' .. tostring(type(subPage.content)))
+        return false
     end
+
+    return true
 end
 
 local function registerSubPage(subPage)
     if type(subPage) ~= 'table' then
         print('[OTK - ERR] OTKTavernMenu.registerSubPage expected Subpage Table, got: ' .. tostring(type(subPage)))
+        return false
     end
+
+    if type(subPage.name) ~= 'string' or subPage.name == '' then
+        print('[OTK - ERR] OTKTavernMenu.registerSubPage: subPage.name must be a non-empty string, got: ' .. tostring(subPage.name))
+        return false
+    end
+
+    if type(subPage.label) ~= 'string' or subPage.label == '' then
+        print('[OTK - ERR] OTKTavernMenu.registerSubPage: subPage.label must be a non-empty string for ' .. tostring(subPage.name))
+        return false
+    end
+
+    if subPage.type == 'text' then
+        return subPageText(subPage)
+    end
+
+    print('[OTK - ERR] OTKTavernMenu.registerSubPage: Unsupported Subpage type for ' .. tostring(subPage.name) .. ': ' .. tostring(subPage.type))
+    return false
+end
+
+-- Pulls the direct child key order under subPages from the raw YAML text.
+---@param yamlData string
+---@return table
+local function getYamlSubPageOrder(yamlData)
+    local order = {}
+    local inSubPages = false
+    local subPagesIndent = nil
+    local childIndent = nil
+
+    for line in yamlData:gmatch('[^\r\n]+') do
+        local indentText = line:match('^(%s*)') or ''
+        local indent = #indentText
+        local trimmed = line:match('^%s*(.-)%s*$') or ''
+
+        if trimmed ~= '' and not trimmed:match('^#') then
+            if not inSubPages then
+                if trimmed:match('^subPages%s*:%s*$') then
+                    inSubPages = true
+                    subPagesIndent = indent
+                end
+            else
+                if indent <= subPagesIndent then
+                    break
+                end
+
+                local key = trimmed:match('^([%w_%-]+)%s*:%s*$')
+                if key then
+                    if not childIndent then
+                        childIndent = indent
+                    end
+                    if indent == childIndent then
+                        order[#order + 1] = key
+                    end
+                end
+            end
+        end
+    end
+
+    return order
+end
+
+---@param subPages table|nil
+---@param yamlOrder table
+---@param pageName string
+---@return table
+local function normalizeSubPages(subPages, yamlOrder, pageName)
+    local normalized = {}
+
+    if type(subPages) ~= 'table' then
+        return normalized
+    end
+
+    local seen = {}
+
+    local function addSubPage(key)
+        local rawSubPage = subPages[key]
+        if type(rawSubPage) ~= 'table' then
+            print('[OTK - ERR] OTKTavernMenu.normalizeSubPages: Subpage ' .. tostring(key) .. ' in Page ' .. tostring(pageName) .. ' must be a table, got: ' .. tostring(type(rawSubPage)))
+            return
+        end
+
+        local subPage = {
+            name = key,
+            label = rawSubPage.label,
+            type = rawSubPage.type,
+            content = rawSubPage.content,
+        }
+
+        if registerSubPage(subPage) then
+            normalized[#normalized + 1] = subPage
+        end
+    end
+
+    for _, key in ipairs(yamlOrder) do
+        if subPages[key] ~= nil then
+            seen[key] = true
+            addSubPage(key)
+        end
+    end
+
+    local fallbackKeys = {}
+    for key in pairs(subPages) do
+        if not seen[key] then
+            fallbackKeys[#fallbackKeys + 1] = key
+        end
+    end
+    table.sort(fallbackKeys, function (a, b)
+        return tostring(a) < tostring(b)
+    end)
+
+    for _, key in ipairs(fallbackKeys) do
+        addSubPage(key)
+    end
+
+    return normalized
 end
 
 ---@class TavernPage
 ---@field name string -- Returned name string from module
 ---@field label string -- Returned text string from module
 ---@field index integer -- Returned index integer from module
+---@field subPages table -- Ordered subpage records
 
 -- Normalizes page data loaded from YAML into the same shape the UI already expects.
 ---@param fileName string
 ---@param page table
+---@param yamlData string
 ---@return TavernPage|nil
-local function normalizePageData(fileName, page)
+local function normalizePageData(fileName, page, yamlData)
     if type(page) ~= 'table' then
         print('[OTK - ERR] OTKTavernMenu.normalizePageData expected Page table from YAML in ' .. tostring(fileName) .. ', got: ' .. tostring(type(page)))
         return nil
     end
+
+    local yamlOrder = getYamlSubPageOrder(yamlData)
+    page.subPages = normalizeSubPages(page.subPages, yamlOrder, page.name)
 
     return page
 end
@@ -200,7 +336,7 @@ local function loadPageFiles()
                 if not ok then
                     print('[OTK - ERR] OTKTavernMenu.loadPageFiles: Failed to decode YAML ' .. fileName .. ': ' .. tostring(pageOrErr))
                 else
-                    local page = normalizePageData(fileName, pageOrErr)
+                    local page = normalizePageData(fileName, pageOrErr, yamlData)
                     if page then
                         print('[OTK] Loaded page YAML: ' .. fileName .. ' | index=' .. tostring(page.index))
                         registerPage(page)
@@ -269,6 +405,7 @@ end
 ---@field contentSize number
 ---@field thickness integer
 ---@field thumbLength integer
+---@field reserveSpace boolean
 
 ---@type table<any, ScrollBarData>
 local scrollBars = {}
@@ -277,6 +414,8 @@ local scrollBars = {}
 local scrollableWindow = nil -- Our flex element which 'moves' when scrolled
 local hostElem = nil -- Declares the 'host' element of the flex element
 local scrollContentSize = nil
+local addScrollBar = nil
+local updateScrollBar = nil
 
 ---@class ScrollMetrics
 ---@field isHorizontal boolean
@@ -369,6 +508,322 @@ local function clearScrollTarget(flexElem)
         hostElem = nil
         scrollContentSize = nil
     end
+end
+
+---@param subPage table
+local function updateSubPageButtonVisual(subPage)
+    if not subPage or not subPage.buttonBackground then return end
+
+    if OTKUI.elems.currentSubPage == subPage then
+        subPage.buttonBackground.layout.props.alpha = 0.45
+        subPage.buttonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.5)
+    else
+        subPage.buttonBackground.layout.props.alpha = 0.2
+        subPage.buttonBackground.layout.props.color = OTKUI.art.colorBlack
+    end
+
+    subPage.buttonBackground:update()
+end
+
+---@param hasScrollBar boolean
+local function setSubPageScrollBarSpace(hasScrollBar)
+    local scrollBarStack = OTKUI.elems.subPageListScrollBarStackWidget
+    local contentStack = OTKUI.elems.subPageContentStackWidget
+    local baseSize = OTKUI.elems.subPageContentBaseSize
+
+    if not scrollBarStack or not scrollBarStack.layout then return end
+    if not contentStack or not contentStack.layout then return end
+    if not baseSize then return end
+
+    local scrollBarHeight = hasScrollBar and OTKUI.constants.HORIZONTAL_SCROLLBAR_THICKNESS or 0
+
+    scrollBarStack.layout.props.size = v2(scrollBarStack.layout.props.size.x, scrollBarHeight)
+    contentStack.layout.props.size = v2(baseSize.x, baseSize.y - scrollBarHeight)
+
+    scrollBarStack:update()
+    contentStack:update()
+end
+
+---@param subPage table|nil
+local function showSubPage(subPage)
+    local previousSubPage = OTKUI.elems.currentSubPage
+
+    if previousSubPage and previousSubPage ~= subPage and previousSubPage.contentHost then
+        previousSubPage.contentHost.layout.props.visible = false
+        previousSubPage.contentHost:update()
+    end
+
+    OTKUI.elems.currentSubPage = subPage
+
+    if previousSubPage then
+        updateSubPageButtonVisual(previousSubPage)
+    end
+
+    if not subPage or not subPage.contentHost then return end
+
+    if OTKUI.elems.subPageContentStackWidget and OTKUI.elems.subPageContentStackWidget.layout then
+        subPage.contentHost.layout.props.size = OTKUI.elems.subPageContentStackWidget.layout.props.size
+    end
+
+    subPage.contentHost.layout.props.visible = true
+    subPage.contentHost:update()
+    updateSubPageButtonVisual(subPage)
+end
+
+---@param page table
+local function showPage(page)
+    if OTKUI.elems.currentPage and OTKUI.elems.currentPage.subPageListFlex then
+        OTKUI.elems.currentPage.subPageListFlex.layout.props.visible = false
+        OTKUI.elems.currentPage.subPageListFlex:update()
+    end
+
+    if OTKUI.elems.currentPage and OTKUI.elems.currentPage.subPageScrollBarHost then
+        OTKUI.elems.currentPage.subPageScrollBarHost.layout.props.visible = false
+        OTKUI.elems.currentPage.subPageScrollBarHost:update()
+    end
+
+    if OTKUI.elems.currentPage and OTKUI.elems.currentPage.subPageListFlex then
+        clearScrollTarget(OTKUI.elems.currentPage.subPageListFlex)
+    end
+
+    OTKUI.elems.currentPage = page
+
+    setSubPageScrollBarSpace(page and page.hasSubPageScrollBar == true)
+
+    if page and page.subPageListFlex then
+        page.subPageListFlex.layout.props.visible = true
+        page.subPageListFlex:update()
+    end
+
+    if page and page.subPageScrollBarHost and page.hasSubPageScrollBar then
+        page.subPageScrollBarHost.layout.props.visible = true
+        page.subPageScrollBarHost:update()
+        updateScrollBar(page.subPageListFlex)
+    end
+
+    if page and page.subPages and page.subPages[1] then
+        showSubPage(page.subPages[1])
+    else
+        showSubPage(nil)
+    end
+end
+
+---@param subPage table
+---@param contentHost any
+local function buildTextSubPage(subPage, contentHost)
+    local subpageHostFlex = ui.create {
+        name = subPage.name..'_subPageHostFlex',
+        type = ui.TYPE.Flex,
+        props = {
+            relativeSize = v2(1, 1),
+            horizontal = false,
+        },
+        content = ui.content {},
+    }
+    contentHost.layout.content:add(subpageHostFlex)
+
+    local subpageText = ui.create {
+        name = subPage.name..'_subPageText',
+        type = ui.TYPE.Text,
+        props = {
+            multiline = true,
+            wordWrap = true,
+            text = subPage.content,
+            textSize = OTKUI.constants.SUBPAGE_CONTENT_TEXT_SIZE,
+            textColor = OTKUI.art.morrowindLight,
+            textShadow = true,
+            textShadowColor = OTKUI.art.colorBlack,
+            textAlignH = ui.ALIGNMENT.Start,
+            textAlignV = ui.ALIGNMENT.Start,
+        },
+    }
+    subpageHostFlex.layout.content:add(subpageText)
+end
+
+---@param page table
+---@param subPage table
+---@param subpageListWidget any
+---@return any
+local function buildSubPageButton(page, subPage, subpageListWidget)
+    local subpageButton = ui.create {
+        name = page.name..'_'..subPage.name..'_subPageButton',
+        type = ui.TYPE.Widget,
+        template = MWUI.templates.borders,
+        props = {
+            size = v2(subpageListWidget.layout.props.size.x / 3.5, subpageListWidget.layout.props.size.y),
+        },
+        content = ui.content {},
+    }
+
+    local subpageButtonBackground = ui.create {
+        name = page.name..'_'..subPage.name..'_subPageButtonBackground',
+        type = ui.TYPE.Image,
+        props = {
+            relativeSize = v2(1, 1),
+            resource = OTKUI.art.whiteTexture,
+            color = OTKUI.art.colorBlack,
+            alpha = 0.2,
+            inheritAlpha = false,
+        },
+    }
+    subpageButton.layout.content:add(subpageButtonBackground)
+    subPage.buttonBackground = subpageButtonBackground
+
+    local subpageButtonText = ui.create {
+        name = page.name..'_'..subPage.name..'_subPageButtonText',
+        type = ui.TYPE.Text,
+        props = {
+            text = subPage.label,
+            textSize = OTKUI.constants.SUBPAGE_BUTTON_TEXT_SIZE,
+            textColor = OTKUI.art.morrowindGold,
+            textShadow = true,
+            textShadowColor = OTKUI.art.colorBlack,
+            relativePosition = v2(0.5, 0.5),
+            anchor = v2(0.5, 0.5),
+            textAlignH = ui.ALIGNMENT.Center,
+            textAlignV = ui.ALIGNMENT.Center,
+        },
+        content = ui.content {},
+    }
+    subpageButton.layout.content:add(subpageButtonText)
+
+    local clickBox = ui.create {
+        name = page.name..'_'..subPage.name..'_subPageClickBox',
+        type = ui.TYPE.Image,
+        props = {
+            relativeSize = v2(1, 1),
+            alpha = 0,
+        },
+        content = ui.content {},
+        events = {},
+    }
+
+    clickBox.layout.events = {
+        focusGain = async:callback(function ()
+            onFrameFunctions[page.name..'_'..subPage.name..'_subPageFocusGain'] = function ()
+                if scrollableWindow == nil and page.subPageListHostWidget then
+                    setScrollTarget(page.subPageListFlex, page.subPageListHostWidget, getSubPageListSize(page))
+                end
+                if OTKUI.elems.currentSubPage ~= subPage then
+                    subpageButtonBackground.layout.props.alpha = 0.35
+                    subpageButtonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.35)
+                    subpageButtonBackground:update()
+                end
+            end
+        end),
+        focusLoss = async:callback(function ()
+            onFrameFunctions[page.name..'_'..subPage.name..'_subPageFocusLoss'] = function ()
+                clearScrollTarget(page.subPageListFlex)
+                updateSubPageButtonVisual(subPage)
+            end
+        end),
+        mousePress = async:callback(function (event)
+            if event.button == 1 then
+                onFrameFunctions[page.name..'_'..subPage.name..'_subPageMousePress'] = function ()
+                    subpageButtonBackground.layout.props.alpha = 0.7
+                    subpageButtonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.7)
+                    subpageButtonBackground:update()
+                end
+            end
+        end),
+        mouseRelease = async:callback(function (event)
+            if event.button == 1 then
+                onFrameFunctions[page.name..'_'..subPage.name..'_subPageMouseRelease'] = function ()
+                    showSubPage(subPage)
+                end
+            end
+        end),
+    }
+    subpageButton.layout.content:add(clickBox)
+
+    return subpageButton
+end
+
+---@param page table
+---@param subpageListWidget any
+---@param subpageListHostWidget any
+---@param subpageListScrollBarStackWidget any
+---@param subpageContentStackWidget any
+local function buildSubPages(page, subpageListWidget, subpageListHostWidget, subpageListScrollBarStackWidget, subpageContentStackWidget)
+    if type(page.subPages) ~= 'table' then return end
+
+    local buttonWidth = subpageListWidget.layout.props.size.x / 3.5
+    page.subPageButtonWidth = buttonWidth
+    page.subPageListHostWidget = subpageListHostWidget
+
+    local subpageListFlex = ui.create {
+        name = page.name..'_subPageListFlex',
+        type = ui.TYPE.Flex,
+        props = {
+            horizontal = true,
+            visible = false,
+            position = v2(0, 0),
+        },
+        content = ui.content {},
+        events = {},
+    }
+    page.subPageListFlex = subpageListFlex
+    subpageListHostWidget.layout.content:add(subpageListFlex)
+
+    subpageListFlex.layout.events = {
+        focusGain = async:callback(function ()
+            if scrollableWindow == nil then
+                onFrameFunctions[page.name..'_subPageListFocusGain'] = function ()
+                    setScrollTarget(subpageListFlex, subpageListHostWidget, getSubPageListSize(page))
+                end
+            end
+        end),
+        focusLoss = async:callback(function ()
+            onFrameFunctions[page.name..'_subPageListFocusLoss'] = function ()
+                clearScrollTarget(subpageListFlex)
+            end
+        end),
+    }
+
+    local subpageScrollBarHost = ui.create {
+        name = page.name..'_subPageScrollBarHost',
+        type = ui.TYPE.Widget,
+        props = {
+            visible = false,
+            size = v2(0, 0),
+        },
+        content = ui.content {},
+    }
+    page.subPageScrollBarHost = subpageScrollBarHost
+    subpageListScrollBarStackWidget.layout.content:add(subpageScrollBarHost)
+
+    for i = 1, #page.subPages do
+        local subPage = page.subPages[i]
+        local subpageContentHost = ui.create {
+            name = page.name..'_'..subPage.name..'_subPageContentHost',
+            type = ui.TYPE.Widget,
+            template = MWUI.templates.borders,
+            props = {
+                visible = false,
+                size = subpageContentStackWidget.layout.props.size,
+            },
+            content = ui.content {},
+        }
+        subPage.contentHost = subpageContentHost
+        subpageContentStackWidget.layout.content:add(subpageContentHost)
+
+        if subPage.type == 'text' then
+            buildTextSubPage(subPage, subpageContentHost)
+        end
+
+        subpageListFlex.layout.content:add(buildSubPageButton(page, subPage, subpageListWidget))
+    end
+
+    page.hasSubPageScrollBar = addScrollBar(
+        subpageScrollBarHost,
+        subpageListFlex,
+        subpageListHostWidget,
+        getSubPageListSize(page),
+        {
+            namePrefix = page.name..'_subPageList',
+            reserveSpace = false,
+        }
+    ) ~= nil
 end
 
 -- Builds our page list from pageList info
@@ -478,6 +933,7 @@ local function buildPageList(pageFlex, pageListHost)
                             pageBackground.layout.props.alpha = 0.7
                             pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.7)
                             pageBackground:update()
+                            showPage(page)
                         end
                     end
                 end)
@@ -522,6 +978,7 @@ end
 
 ---@class ScrollBarOptions
 ---@field namePrefix? string
+---@field reserveSpace? boolean
 
 -- Function called to add a scroll bar (when needed)
 ---@param scrollBarHost any -- UI element
@@ -530,7 +987,7 @@ end
 ---@param contentSize number
 ---@param options? ScrollBarOptions
 ---@return any|nil
-local function addScrollBar(scrollBarHost, flexElem, flexHost, contentSize, options)
+addScrollBar = function (scrollBarHost, flexElem, flexHost, contentSize, options)
     if not scrollBarHost or not scrollBarHost.layout then return nil end
 
     local scrollMetrics = getScrollMetrics(flexElem, flexHost, contentSize) -- Get our scroll bar metrics
@@ -541,9 +998,12 @@ local function addScrollBar(scrollBarHost, flexElem, flexHost, contentSize, opti
     local thickness = scrollMetrics.isHorizontal and OTKUI.constants.HORIZONTAL_SCROLLBAR_THICKNESS or OTKUI.constants.VERTICAL_SCROLLBAR_THICKNESS -- The width (for vertical) or height (for horizontal) of the track/thumb
 
     local namePrefix = options.namePrefix or (flexElem.layout.name or 'scroll')
+    local reserveSpace = options.reserveSpace ~= false
 
     -- Reserve space if a scrollbar is needed
-    reserveScrollBarSpace(flexHost, thickness, scrollMetrics.isHorizontal)
+    if reserveSpace then
+        reserveScrollBarSpace(flexHost, thickness, scrollMetrics.isHorizontal)
+    end
 
     -- Recalculate after shrinking the host, since hostSize has changed
     scrollMetrics = getScrollMetrics(flexElem, flexHost, contentSize)
@@ -621,6 +1081,7 @@ local function addScrollBar(scrollBarHost, flexElem, flexHost, contentSize, opti
         contentSize = contentSize,
         thickness = thickness,
         thumbLength = thumbLength,
+        reserveSpace = reserveSpace,
     }
 
     return scrollBarWidget
@@ -628,12 +1089,14 @@ end
 
 -- Function called to update the scroll bar of a given UI element
 ---@param flexElem any -- UI element
-local function updateScrollBar(flexElem)
+updateScrollBar = function (flexElem)
     local scrollBarData = scrollBars[flexElem]
     if not scrollBarData then return end
 
     local isHorizontal = flexElem.layout.props.horizontal == true
-    reserveScrollBarSpace(scrollBarData.hostElem, scrollBarData.thickness, isHorizontal)
+    if scrollBarData.reserveSpace then
+        reserveScrollBarSpace(scrollBarData.hostElem, scrollBarData.thickness, isHorizontal)
+    end
 
     local scrollMetrics = getScrollMetrics(flexElem, scrollBarData.hostElem, scrollBarData.contentSize)
     if not scrollMetrics or not scrollMetrics.canScroll then return end
@@ -739,6 +1202,11 @@ end
 -- Called to construct the menu
 local function buildMenu()
     print('[OTK] OTKTavernMenu.buildMenu: Building the Tavern Menu!')
+    OTKUI.elems.currentPage = nil
+    OTKUI.elems.currentSubPage = nil
+    OTKUI.elems.subPageListScrollBarStackWidget = nil
+    OTKUI.elems.subPageContentStackWidget = nil
+    OTKUI.elems.subPageContentBaseSize = nil
 
     -- Variables used to scale assets by screen size
     local screenSize = ui.layers[2].size
@@ -766,8 +1234,6 @@ local function buildMenu()
         type = ui.TYPE.Image,
         props = {
             relativeSize = v2(1, 1),
-            anchor = v2(0.5, 0.5),
-            relativePosition = v2(0.5, 0.5),
             resource = getTexture('textures/nibby/scroll.dds')
         },
     }
@@ -801,6 +1267,7 @@ local function buildMenu()
 
     -- Event for allowing the UI to be moved
     -- Thanks to nox7 and S3ctor
+    --[[
     topBarWidget.layout.events = {
         mouseMove = async:callback(function (event)
             if event.button ~= 1 then return end -- Checks for left click
@@ -813,6 +1280,7 @@ local function buildMenu()
             end
         end)
     }
+    ]]--
 
     rootVerticalFlex.layout.content:add(topBarWidget)
 
@@ -1180,59 +1648,68 @@ local function buildMenu()
     }
     pageContentFlex.layout.content:add(subpageListWidget)
 
-    local subpageListFlex = ui.create {
-        name = 'subpageListFlex',
-        type = ui.TYPE.Flex,
-        props = {
-            horizontal = true,
-        },
-        content = ui.content {},
-    }
-    subpageListWidget.layout.content:add(subpageListFlex)
-
-    -- Example of subpage button
-    local subpageExButton = ui.create {
-        name = 'subpageExButton',
+    local subpageListHostWidget = ui.create {
+        name = 'subpageListHostWidget',
         type = ui.TYPE.Widget,
-        template = MWUI.templates.borders,
         props = {
-            size = v2(subpageListWidget.layout.props.size.x / 3.5, subpageListWidget.layout.props.size.y),
+            size = subpageListWidget.layout.props.size,
+        },
+        content = ui.content {},
+        events = {},
+    }
+    subpageListWidget.layout.content:add(subpageListHostWidget)
+
+    subpageListHostWidget.layout.events = {
+        focusGain = async:callback(function ()
+            if scrollableWindow == nil and OTKUI.elems.currentPage and OTKUI.elems.currentPage.subPageListFlex then
+                onFrameFunctions['subPageListHost_focusGain'] = function ()
+                    setScrollTarget(
+                        OTKUI.elems.currentPage.subPageListFlex,
+                        subpageListHostWidget,
+                        getSubPageListSize(OTKUI.elems.currentPage)
+                    )
+                end
+            end
+        end),
+    }
+
+    OTKUI.elems.subPageListScrollBarStackWidget = ui.create {
+        name = 'subpageListScrollBarStackWidget',
+        type = ui.TYPE.Widget,
+        props = {
+            size = v2(subpageListWidget.layout.props.size.x, 0),
         },
         content = ui.content {},
     }
+    pageContentFlex.layout.content:add(OTKUI.elems.subPageListScrollBarStackWidget)
 
-    local subpageExButtonBackground = ui.create {
-        name = 'subpageExButtonBackground',
-        type = ui.TYPE.Image,
-        props = {
-            relativeSize = v2(1, 1),
-            resource = OTKUI.art.whiteTexture,
-            color = OTKUI.art.colorBlack,
-            alpha = 0.2,
-            inheritAlpha = false,
-        }
-    }
-    subpageExButton.layout.content:add(subpageExButtonBackground)
+    OTKUI.elems.subPageContentBaseSize = v2(
+        pageContentHost.layout.props.size.x,
+        pageContentHost.layout.props.size.y - subpageListWidget.layout.props.size.y
+    )
 
-    local subpageExButtonText = ui.create {
-        name = 'subpageExButtonText',
-        type = ui.TYPE.Text,
+    OTKUI.elems.subPageContentStackWidget = ui.create {
+        name = 'subpageContentStackWidget',
+        type = ui.TYPE.Widget,
         props = {
-            text = "Example",
-            textSize = OTKUI.constants.SUBPAGE_BUTTON_TEXT_SIZE,
-            textColor = OTKUI.art.morrowindGold,
-            textShadow = true,
-            textShadowColor = OTKUI.art.colorBlack,
-            relativePosition = v2(0.5, 0.5),
-            anchor = v2(0.5, 0.5),
-            textAlignH = ui.ALIGNMENT.Center,
-            textAlignV = ui.ALIGNMENT.Center,
+            size = OTKUI.elems.subPageContentBaseSize,
         },
         content = ui.content {},
     }
-    subpageExButton.layout.content:add(subpageExButtonText)
+    pageContentFlex.layout.content:add(OTKUI.elems.subPageContentStackWidget)
 
-    subpageListFlex.layout.content:add(subpageExButton)
+    for i = 1, OTKUI.pages.count do
+        local page = OTKUI.pages.list[i]
+        if page then
+            buildSubPages(
+                page,
+                subpageListWidget,
+                subpageListHostWidget,
+                OTKUI.elems.subPageListScrollBarStackWidget,
+                OTKUI.elems.subPageContentStackWidget
+            )
+        end
+    end
 
     -- The bottom bar, which runs along the bottom of the window
     local bottomBarWidget = ui.create {
