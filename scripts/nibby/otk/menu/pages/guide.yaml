@@ -4,39 +4,33 @@
  label: "Guide"
  index: 1
  subPages:
-  start:
-   label: "Start"
-   type: "text"
-   content: |-
-    This menu will walk the player through starting the mod
+  - name: "Start"
+    type: "text"
+    tooltip: |-
+     This menu will walk the player through starting the mod
 
-    Or showcase how to use the tavern catalog
-  workers:
-   label: "Workers"
-   type: "text"
-   content: |-
-    This section will explain the employees, and how their skills work
+     Or showcase how to use the tavern catalog
+  - name: "Workers"
+    type: "text"
+    tooltip: |-
+     This section will explain the employees, and how their skills work
 
-    It will eventually include pictures!
-  drinks:
-   label: "Drinks"
-   type: "text"
-   content: |-
-    This menu will explain how Drinks and Brewing works!
-  food:
-   label: "Food"
-   type: "text"
-   content: |-
-    This menu will explain how Food and Cooking works!
-  building:
-   label: "Building"
-   type: "text"
-   content: |-
-    This menu will explain how Building works!
-  stories:
-   label: "Stories"
-   type: "text"
-   content: |-
-    This menu will explain how Stories work!
+     It will eventually include pictures!
+  - name: "Drinks"
+    type: "text"
+    tooltip: |-
+     This menu will explain how Drinks and Brewing works!
+  - name: "Food"
+    type: "text"
+    tooltip: |-
+     This menu will explain how Food and Cooking works!
+  - name: "Building"
+    type: "text"
+    tooltip: |-
+     This menu will explain how Building works!
+  - name: "Stories"
+    type: "text"
+    tooltip: |-
+     This menu will explain how Stories work!
 
 ...

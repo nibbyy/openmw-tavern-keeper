@@ -4,19 +4,17 @@
  label: "Taverns"
  index: 2
  subPages:
-  buy:
-   label: "Buy"
-   type: "text"
-   content: |-
-    Here, you'll be able to look at the list of taverns and be able to purchase one
+  - name: "Buy"
+    type: "text"
+    tooltip: |-
+     Here, you'll be able to look at the list of taverns and be able to purchase one
 
-    We'll change this to a Catalog later
-  manage:
-   label: "Manage"
-   type: "text"
-   content: |-
-    Here you'll be able to manage your Taverns
+     We'll change this to a Catalog later
+  - name: "Manage"
+    type: "text"
+    tooltip: |-
+     Here you'll be able to manage your Taverns
 
-    Should include statistics on how well each one is doing
+     Should include statistics on how well each one is doing
 
 ...

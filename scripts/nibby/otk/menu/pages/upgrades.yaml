@@ -4,19 +4,17 @@
  label: "Upgrades"
  index: 4
  subPages:
-  furniture:
-   label: "Furniture"
-   type: "text"
-   content: |-
-    This menu will be a list of Tavern furniture you can purchase
+  - name: "Furniture"
+    type: "text"
+    tooltip: |-
+     This menu will be a list of Tavern furniture you can purchase
 
-    It'll be changed to a Catalog later
-  services:
-   label: "Services"
-   type: "text"
-   content: |-
-    This menu will be a list of Tavern services you can offer
+     It'll be changed to a Catalog later
+  - name: "Services"
+    type: "text"
+    tooltip: |-
+     This menu will be a list of Tavern services you can offer
 
-    They are likely to cost Upkeep as well
+     They are likely to cost Upkeep as well
 
 ...

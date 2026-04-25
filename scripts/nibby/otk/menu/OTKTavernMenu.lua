@@ -32,9 +32,9 @@ local OTKUI = {
         SUBPAGE_BUTTON_TEXT_SIZE = 14,
         SUBPAGE_CONTENT_TEXT_SIZE = 12,
         VERTICAL_SCROLLBAR_THICKNESS = 8,
-        HORIZONTAL_SCROLLBAR_THICKNESS = 16,
-        VERTICAL_THUMB_SIZE = v2(4, 64),
-        HORIZONTAL_THUMB_SIZE = v2(16, 16),
+        HORIZONTAL_SCROLLBAR_THICKNESS = 8,
+        VERTICAL_THUMB_SIZE = v2(8, 64),
+        HORIZONTAL_THUMB_SIZE = v2(64, 8),
         VERTICAL_THUMB_CAP_HEIGHT = 4,
     },
     elems = { -- Declared early for reassignment & checking
@@ -46,6 +46,12 @@ local OTKUI = {
         subPageListScrollBarStackWidget = nil,
         subPageContentStackWidget = nil,
         subPageContentBaseSize = nil,
+        subpageHelpButton = nil,
+        tooltip = {
+            hostWidget = nil,
+            currentTooltip = nil,
+            tooltipText = nil,
+        },
     },
     pages = {
         pageFilePath = 'scripts/nibby/otk/menu/pages/',
@@ -120,6 +126,16 @@ local function closeMenu()
     print('[OTK] OTKTavernMenu: Closing the Tavern Menu')
     OTKUI.elems.rootWidget.layout.props.visible = false -- Closes the menu
     OTKUI.elems.rootWidget:update()
+
+    if OTKUI.elems.subpageHelpButton and OTKUI.elems.subpageHelpButton.layout then
+        OTKUI.elems.subpageHelpButton.layout.props.visible = false
+        OTKUI.elems.subpageHelpButton:update()
+    end
+
+    if OTKUI.elems.tooltip.hostWidget and OTKUI.elems.tooltip.hostWidget.layout then
+        OTKUI.elems.tooltip.hostWidget.layout.props.visible = false
+        OTKUI.elems.tooltip.hostWidget:update()
+    end
 end
 
 -- Called by other scripts to add functions to onFrameFunctions
@@ -131,15 +147,7 @@ local function addOnFrameFunction(key, func)
     onFrameFunctions[key] = func
 end
 
-local function subPageText(subPage)
-    if type(subPage.content) ~= 'string' then
-        print('[OTK - ERR] OTKTavernMenu.subPageText expected Subpage Content String for ' .. tostring(subPage.name) .. ', got: ' .. tostring(type(subPage.content)))
-        return false
-    end
-
-    return true
-end
-
+-- Called per Page to register subpages
 local function registerSubPage(subPage)
     if type(subPage) ~= 'table' then
         print('[OTK - ERR] OTKTavernMenu.registerSubPage expected Subpage Table, got: ' .. tostring(type(subPage)))
@@ -151,111 +159,49 @@ local function registerSubPage(subPage)
         return false
     end
 
-    if type(subPage.label) ~= 'string' or subPage.label == '' then
-        print('[OTK - ERR] OTKTavernMenu.registerSubPage: subPage.label must be a non-empty string for ' .. tostring(subPage.name))
-        return false
-    end
-
     if subPage.type == 'text' then
-        return subPageText(subPage)
+        if subPage.content ~= nil and type(subPage.content) ~= 'string' then
+            print('[OTK - ERR] OTKTavernMenu.registerSubPage: Text Subpage content must be a string for ' .. tostring(subPage.name) .. ', got: ' .. tostring(type(subPage.content)))
+            return false
+        end
+
+        if subPage.tooltip ~= nil and type(subPage.tooltip) ~= 'string' then
+            print('[OTK - ERR] OTKTavernMenu.registerSubPage: Text Subpage tooltip must be a string for ' .. tostring(subPage.name) .. ', got: ' .. tostring(type(subPage.tooltip)))
+            return false
+        end
+
+        return true
     end
 
     print('[OTK - ERR] OTKTavernMenu.registerSubPage: Unsupported Subpage type for ' .. tostring(subPage.name) .. ': ' .. tostring(subPage.type))
     return false
 end
 
--- Pulls the direct child key order under subPages from the raw YAML text.
----@param yamlData string
----@return table
-local function getYamlSubPageOrder(yamlData)
-    local order = {}
-    local inSubPages = false
-    local subPagesIndent = nil
-    local childIndent = nil
-
-    for line in yamlData:gmatch('[^\r\n]+') do
-        local indentText = line:match('^(%s*)') or ''
-        local indent = #indentText
-        local trimmed = line:match('^%s*(.-)%s*$') or ''
-
-        if trimmed ~= '' and not trimmed:match('^#') then
-            if not inSubPages then
-                if trimmed:match('^subPages%s*:%s*$') then
-                    inSubPages = true
-                    subPagesIndent = indent
-                end
-            else
-                if indent <= subPagesIndent then
-                    break
-                end
-
-                local key = trimmed:match('^([%w_%-]+)%s*:%s*$')
-                if key then
-                    if not childIndent then
-                        childIndent = indent
-                    end
-                    if indent == childIndent then
-                        order[#order + 1] = key
-                    end
-                end
-            end
-        end
-    end
-
-    return order
-end
-
 ---@param subPages table|nil
----@param yamlOrder table
 ---@param pageName string
 ---@return table
-local function normalizeSubPages(subPages, yamlOrder, pageName)
+local function normalizeSubPages(subPages, pageName)
     local normalized = {}
 
     if type(subPages) ~= 'table' then
         return normalized
     end
 
-    local seen = {}
-
-    local function addSubPage(key)
-        local rawSubPage = subPages[key]
+    for i, rawSubPage in ipairs(subPages) do
         if type(rawSubPage) ~= 'table' then
-            print('[OTK - ERR] OTKTavernMenu.normalizeSubPages: Subpage ' .. tostring(key) .. ' in Page ' .. tostring(pageName) .. ' must be a table, got: ' .. tostring(type(rawSubPage)))
-            return
+            print('[OTK - ERR] OTKTavernMenu.normalizeSubPages: Subpage #' .. tostring(i) .. ' in Page ' .. tostring(pageName) .. ' must be a table, got: ' .. tostring(type(rawSubPage)))
+        else
+            local subPage = {
+                name = rawSubPage.name,
+                type = rawSubPage.type,
+                content = rawSubPage.content,
+                tooltip = rawSubPage.tooltip,
+            }
+
+            if registerSubPage(subPage) then
+                normalized[#normalized + 1] = subPage
+            end
         end
-
-        local subPage = {
-            name = key,
-            label = rawSubPage.label,
-            type = rawSubPage.type,
-            content = rawSubPage.content,
-        }
-
-        if registerSubPage(subPage) then
-            normalized[#normalized + 1] = subPage
-        end
-    end
-
-    for _, key in ipairs(yamlOrder) do
-        if subPages[key] ~= nil then
-            seen[key] = true
-            addSubPage(key)
-        end
-    end
-
-    local fallbackKeys = {}
-    for key in pairs(subPages) do
-        if not seen[key] then
-            fallbackKeys[#fallbackKeys + 1] = key
-        end
-    end
-    table.sort(fallbackKeys, function (a, b)
-        return tostring(a) < tostring(b)
-    end)
-
-    for _, key in ipairs(fallbackKeys) do
-        addSubPage(key)
     end
 
     return normalized
@@ -267,24 +213,28 @@ end
 ---@field index integer -- Returned index integer from module
 ---@field subPages table -- Ordered subpage records
 
--- Normalizes page data loaded from YAML into the same shape the UI already expects.
+---@class TavernSubPage
+---@field name string
+---@field type string
+---@field content string|nil
+---@field tooltip string|nil
+
+-- Normalizes page data loaded from YAML into the same shape the UI expects
 ---@param fileName string
 ---@param page table
----@param yamlData string
 ---@return TavernPage|nil
-local function normalizePageData(fileName, page, yamlData)
+local function normalizePageData(fileName, page)
     if type(page) ~= 'table' then
         print('[OTK - ERR] OTKTavernMenu.normalizePageData expected Page table from YAML in ' .. tostring(fileName) .. ', got: ' .. tostring(type(page)))
         return nil
     end
 
-    local yamlOrder = getYamlSubPageOrder(yamlData)
-    page.subPages = normalizeSubPages(page.subPages, yamlOrder, page.name)
+    page.subPages = normalizeSubPages(page.subPages, page.name)
 
     return page
 end
 
--- Registers our pages by information from their YAML data.
+-- Registers our pages by information from YAML data
 ---@param page TavernPage -- Page data
 local function registerPage(page)
     if type(page) ~= 'table' then
@@ -336,7 +286,7 @@ local function loadPageFiles()
                 if not ok then
                     print('[OTK - ERR] OTKTavernMenu.loadPageFiles: Failed to decode YAML ' .. fileName .. ': ' .. tostring(pageOrErr))
                 else
-                    local page = normalizePageData(fileName, pageOrErr, yamlData)
+                    local page = normalizePageData(fileName, pageOrErr)
                     if page then
                         print('[OTK] Loaded page YAML: ' .. fileName .. ' | index=' .. tostring(page.index))
                         registerPage(page)
@@ -356,7 +306,7 @@ end
 ---@return any ui.texture
 local function getThumbTexture(isHorizontal)
     if isHorizontal then
-        return getTexture('textures/tx_scroll_button.dds')
+        return getTexture('textures/nibby/hor_bar.dds')
     else
         return getTexture('textures/menu_scroll_button_vert.dds')
     end
@@ -525,6 +475,8 @@ local function updateSubPageButtonVisual(subPage)
     subPage.buttonBackground:update()
 end
 
+local updateSubPageHelpButtonVisibility
+
 ---@param hasScrollBar boolean
 local function setSubPageScrollBarSpace(hasScrollBar)
     local scrollBarStack = OTKUI.elems.subPageListScrollBarStackWidget
@@ -557,6 +509,10 @@ local function showSubPage(subPage)
 
     if previousSubPage then
         updateSubPageButtonVisual(previousSubPage)
+    end
+
+    if updateSubPageHelpButtonVisibility then
+        updateSubPageHelpButtonVisibility()
     end
 
     if not subPage or not subPage.contentHost then return end
@@ -628,7 +584,7 @@ local function buildTextSubPage(subPage, contentHost)
         props = {
             multiline = true,
             wordWrap = true,
-            text = subPage.content,
+            text = subPage.content or '',
             textSize = OTKUI.constants.SUBPAGE_CONTENT_TEXT_SIZE,
             textColor = OTKUI.art.morrowindLight,
             textShadow = true,
@@ -673,7 +629,7 @@ local function buildSubPageButton(page, subPage, subpageListWidget)
         name = page.name..'_'..subPage.name..'_subPageButtonText',
         type = ui.TYPE.Text,
         props = {
-            text = subPage.label,
+            text = subPage.name,
             textSize = OTKUI.constants.SUBPAGE_BUTTON_TEXT_SIZE,
             textColor = OTKUI.art.morrowindGold,
             textShadow = true,
@@ -693,6 +649,7 @@ local function buildSubPageButton(page, subPage, subpageListWidget)
         props = {
             relativeSize = v2(1, 1),
             alpha = 0,
+            inheritAlpha = false,
         },
         content = ui.content {},
         events = {},
@@ -797,7 +754,7 @@ local function buildSubPages(page, subpageListWidget, subpageListHostWidget, sub
         local subpageContentHost = ui.create {
             name = page.name..'_'..subPage.name..'_subPageContentHost',
             type = ui.TYPE.Widget,
-            template = MWUI.templates.borders,
+            --template = MWUI.templates.borders,
             props = {
                 visible = false,
                 size = subpageContentStackWidget.layout.props.size,
@@ -1016,7 +973,7 @@ addScrollBar = function (scrollBarHost, flexElem, flexHost, contentSize, options
     if scrollMetrics.isHorizontal then
         trackSize = v2(scrollMetrics.hostSize, thickness)
         thumbLength = math.min(OTKUI.constants.HORIZONTAL_THUMB_SIZE.x, scrollMetrics.hostSize)
-        thumbSize = v2(thickness, thickness)
+        thumbSize = v2(thumbLength, OTKUI.constants.HORIZONTAL_THUMB_SIZE.y)
     else
         trackSize = v2(thickness, scrollMetrics.hostSize)
         thumbLength = math.min(OTKUI.constants.VERTICAL_THUMB_SIZE.y, math.max(0, scrollMetrics.hostSize - (OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT * 2)))
@@ -1029,7 +986,7 @@ addScrollBar = function (scrollBarHost, flexElem, flexHost, contentSize, options
     local scrollBarWidget = ui.create {
         name = namePrefix..'_scrollBarWidget',
         type = ui.TYPE.Widget,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {
             size = trackSize,
         },
@@ -1043,7 +1000,7 @@ addScrollBar = function (scrollBarHost, flexElem, flexHost, contentSize, options
             relativeSize = v2(1, 1),
             relativePosition = v2(0.5, 0.5),
             anchor = v2(0.5, 0.5),
-            resource = getTexture('textures/tx_scroll_bar.dds'),
+            resource = scrollMetrics.isHorizontal and getTexture('textures/nibby/hor_track.dds') or getTexture('textures/tx_scroll_bar.dds'),
         }
     }
     scrollBarWidget.layout.content:add(trackImage)
@@ -1131,7 +1088,7 @@ updateScrollBar = function (flexElem)
     local thumbPos = math.floor(travelRange * scrollFraction)
 
     if scrollMetrics.isHorizontal then
-        scrollBarData.thumb.layout.props.size = v2(thumbLength, scrollBarData.thickness)
+        scrollBarData.thumb.layout.props.size = v2(thumbLength, OTKUI.constants.HORIZONTAL_THUMB_SIZE.y)
         scrollBarData.thumb.layout.props.position = v2(thumbPos, 0)
     else
         scrollBarData.thumb.layout.props.size = v2(scrollBarData.thickness, thumbLength)
@@ -1196,6 +1153,74 @@ local function exitButtonLogic(elem, texturePath, shouldClose)
     elem:update()
     if shouldClose then
         closeMenu()
+    end
+end
+
+local function registerTextTooltip()
+    OTKUI.elems.tooltip.tooltipText = ui.create {
+        name = 'textTooltipText',
+        type = ui.TYPE.Text,
+        props = {
+            text = '',
+            textColor = OTKUI.art.morrowindLight,
+            textShadow = true,
+            textShadowColor = OTKUI.art.colorBlack,
+            textSize = 14,
+        }
+    }
+    OTKUI.elems.tooltip.hostWidget.layout.content:add(OTKUI.elems.tooltip.tooltipText)
+end
+
+local function registerTooltip()
+    OTKUI.elems.tooltip.hostWidget = ui.create {
+        name = 'textTooltipWidget',
+        type = ui.TYPE.Container,
+        template = MWUI.templates.boxTransparent,
+        layer = 'Popup',
+        props = {
+            position = v2(0, 0),
+            --relativePosition = v2(0.5, 0.5),
+            visible = false,
+        },
+        content = ui.content {},
+        events = {},
+    }
+
+    registerTextTooltip()
+end
+
+local function updateTextTooltip(text, mousePosition)
+    OTKUI.elems.tooltip.tooltipText.layout.props.text = text
+    OTKUI.elems.tooltip.tooltipText:update()
+
+    OTKUI.elems.tooltip.hostWidget.layout.props.position = mousePosition + v2(16, 16)
+    OTKUI.elems.tooltip.hostWidget.layout.props.visible = true
+    OTKUI.elems.tooltip.hostWidget:update()
+end
+
+local function clearTextTooltip()
+    OTKUI.elems.tooltip.tooltipText.layout.props.text = ''
+    OTKUI.elems.tooltip.tooltipText:update()
+
+    OTKUI.elems.tooltip.hostWidget.layout.props.position = v2(0, 0)
+    OTKUI.elems.tooltip.hostWidget.layout.props.visible = false
+    OTKUI.elems.tooltip.hostWidget:update()
+end
+
+updateSubPageHelpButtonVisibility = function()
+    local subpageHelpButton = OTKUI.elems.subpageHelpButton
+    if not subpageHelpButton or not subpageHelpButton.layout then return end
+
+    local currentSubPage = OTKUI.elems.currentSubPage
+    local tooltip = currentSubPage and currentSubPage.tooltip
+    local hasTooltip = type(tooltip) == 'string' and tooltip ~= ''
+
+    OTKUI.elems.tooltip.currentTooltip = hasTooltip and tooltip or nil
+    subpageHelpButton.layout.props.visible = hasTooltip
+    subpageHelpButton:update()
+
+    if not hasTooltip and OTKUI.elems.tooltip.hostWidget then
+        clearTextTooltip()
     end
 end
 
@@ -1639,7 +1664,7 @@ local function buildMenu()
     local subpageListWidget = ui.create {
         name = 'subpageListWidget',
         type = ui.TYPE.Widget,
-        template = MWUI.templates.borders,
+        --template = MWUI.templates.borders,
         props = {
             anchor = v2(0.5, 0.5),
             size = v2(pageContentHost.layout.props.size.x - 4, 32),
@@ -1741,6 +1766,54 @@ local function buildMenu()
     }
     bottomBarWidget.layout.content:add(versionText)
 
+    OTKUI.elems.subpageHelpButton = ui.create {
+        name = 'subpageHelpButton',
+        type = ui.TYPE.Image,
+        layer = 'Modal',
+        props = {
+            resource = getTexture('textures/nibby/tx_scroll_01_outline.dds'),
+            size = v2(32, 32),
+            anchor = v2(0.5, 0.5),
+            relativePosition = v2(0.5, 0.5),
+            position = v2(rootSize.x / 2, -rootSize.y / 8),
+            --position = v2(rootSize.x * 1.15, (rootSize.y / 2 + (subpageListWidget.layout.props.size.y * 0.6))),
+            visible = false,
+        },
+        events = {},
+    }
+    local subpageHelpButton = OTKUI.elems.subpageHelpButton
+
+    registerTooltip()
+
+    subpageHelpButton.layout.events = {
+        focusGain = async:callback(function ()
+            onFrameFunctions['subpageHelp_focusGain'] = function ()
+                subpageHelpButton.layout.props.resource = getTexture('icons/m/tx_scroll_open_01.dds')
+                subpageHelpButton:update()
+            end
+        end),
+        focusLoss = async:callback(function ()
+            onFrameFunctions['subpageHelp_focusLoss'] = function ()
+                subpageHelpButton.layout.props.resource = getTexture('textures/nibby/tx_scroll_01_outline.dds')
+                subpageHelpButton:update()
+                clearTextTooltip()
+            end
+        end),
+        mouseMove = async:callback(function (event)
+            local mousePosition = event.position
+            onFrameFunctions['subpageHelp_mouseMove'] = function ()
+                local currentSubPage = OTKUI.elems.currentSubPage
+                local tooltip = currentSubPage and currentSubPage.tooltip
+                if type(tooltip) == 'string' and tooltip ~= '' then
+                    updateTextTooltip(tooltip, mousePosition)
+                else
+                    clearTextTooltip()
+                end
+            end
+        end),
+    }
+    --pageContentHost.layout.content:add(subpageHelpButton)
+
     print('[OTK] OTKTavernMenu: Tavern Menu built!')
 end
 
@@ -1758,6 +1831,10 @@ local function openMenu()
     interfaces.UI.setMode('Interface', { windows = {}, target = self.object }) -- Clears the UI and unlocks the mouse
     OTKUI.elems.rootWidget.layout.props.visible = true -- Displays the menu
     OTKUI.elems.rootWidget:update() -- Required any time a UI element is changed
+
+    if updateSubPageHelpButtonVisibility then
+        updateSubPageHelpButtonVisibility()
+    end
 end
 
 -- Function called by Trigger keybind to open/close the menu

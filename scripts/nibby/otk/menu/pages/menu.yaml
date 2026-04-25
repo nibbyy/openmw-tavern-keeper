@@ -4,19 +4,17 @@
  label: "Menu"
  index: 3
  subPages:
-  food:
-   label: "Food"
-   type: "text"
-   content: |-
-    This menu will allow the player to add foods to their Menu
+  - name: "Food"
+    type: "text"
+    tooltip: |-
+     This menu will allow the player to add foods to their Menu
 
-    And look at their range of available Types of foods
-  drinks:
-   label: "Drinks"
-   type: "text"
-   content: |-
-    Here you'll be able to see the list of Taverns you've purchased
+     And look at their range of available Types of foods
+  - name: "Drinks"
+    type: "text"
+    tooltip: |-
+     Here you'll be able to see the list of Taverns you've purchased
 
-    You can also sell them if you don't want to keep it
+     You can also sell them if you don't want to keep it
 
 ...

@@ -4,19 +4,17 @@
  label: "Employees"
  index: 6
  subPages:
-  hire:
-   label: "Hire"
-   type: "text"
-   content: |-
-    This menu will allow you to look at the available employees for hire for the day
+  - name: "Hire"
+    type: "text"
+    tooltip: |-
+     This menu will allow you to look at the available employees for hire for the day
 
-    They'll have information attached to them
-  manage:
-   label: "Manage"
-   type: "text"
-   content: |-
-    Here you'll be able to fire your employees, and see their skill levels
+     They'll have information attached to them
+  - name: "Manage"
+    type: "text"
+    tooltip: |-
+     Here you'll be able to fire your employees, and see their skill levels
 
-    How exciting!
+     How exciting!
 
 ...
