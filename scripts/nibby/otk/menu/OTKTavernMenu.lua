@@ -31,11 +31,15 @@ local OTKUI = {
         PAGE_BUTTON_TEXT_SIZE = 18,
         SUBPAGE_BUTTON_TEXT_SIZE = 14,
         SUBPAGE_CONTENT_TEXT_SIZE = 12,
+        TOOLTIP_TEXT_SIZE = 14,
+        TOOLTIP_MAX_CHARS_PER_LINE = 36,
         VERTICAL_SCROLLBAR_THICKNESS = 8,
         HORIZONTAL_SCROLLBAR_THICKNESS = 8,
         VERTICAL_THUMB_SIZE = v2(8, 64),
         HORIZONTAL_THUMB_SIZE = v2(64, 8),
         VERTICAL_THUMB_CAP_HEIGHT = 4,
+        HISTORY_BUTTON_SIZE = v2(24, 24),
+        HISTORY_MAX_ENTRIES = 10,
     },
     elems = { -- Declared early for reassignment & checking
         rootWidget = nil,
@@ -47,6 +51,8 @@ local OTKUI = {
         subPageContentStackWidget = nil,
         subPageContentBaseSize = nil,
         subpageHelpButton = nil,
+        previousHistoryButton = nil,
+        forwardHistoryButton = nil,
         tooltip = {
             hostWidget = nil,
             currentTooltip = nil,
@@ -63,16 +69,12 @@ local OTKUI = {
         morrowindLight = util.color.rgb(0.87451, 0.788235, 0.623529),
         colorBlack = util.color.rgb(0, 0, 0),
         whiteTexture = constants.whiteTexture,
-    }
+    },
+    history = {
+        previousHistory = {},
+        forwardHistory = {},
+    },
 }
-
---[[
-    #####
-
-    HELPERS
-
-    #####
-]]--
 
 ---@type table<string, fun(dt?: number)>
 local onFrameFunctions = {} -- Used for button functions to call onFrame
@@ -147,6 +149,22 @@ local function addOnFrameFunction(key, func)
     onFrameFunctions[key] = func
 end
 
+---@param event table|nil -- Mouse event data from OpenMW UI
+---@param elem any -- UI element receiving the event
+---@return boolean -- True if the mouse position is inside elem's bounds
+local function isMouseInsideElement(event, elem)
+    if not event or not event.offset then return false end
+    if not elem or not elem.layout or not elem.layout.props then return false end
+
+    local size = elem.layout.props.size
+    if not size then return false end
+
+    return event.offset.x >= 0
+        and event.offset.y >= 0
+        and event.offset.x <= size.x
+        and event.offset.y <= size.y
+end
+
 -- Called per Page to register subpages
 local function registerSubPage(subPage)
     if type(subPage) ~= 'table' then
@@ -212,6 +230,8 @@ end
 ---@field label string -- Returned text string from module
 ---@field index integer -- Returned index integer from module
 ---@field subPages table -- Ordered subpage records
+---@field lastSubPage table|nil -- Most recently viewed subpage on this page
+---@field buttonBackground any|nil -- Page button background image
 
 ---@class TavernSubPage
 ---@field name string
@@ -313,6 +333,7 @@ local function getThumbTexture(isHorizontal)
 end
 
 -- Helper function to add thumb caps to scroll bar thumb
+--[[
 ---@param thumbElem any -- UI element
 ---@param thickness integer
 ---@return any, any -- topCap, bottomCap
@@ -344,6 +365,7 @@ local function addThumbCaps(thumbElem, thickness)
 
     return topCap, bottomCap
 end
+]]--
 
 ---@class ScrollBarData
 ---@field track any -- UI element
@@ -475,7 +497,124 @@ local function updateSubPageButtonVisual(subPage)
     subPage.buttonBackground:update()
 end
 
+---@param page table
+local function updatePageButtonVisual(page)
+    if not page or not page.buttonBackground then return end
+
+    if OTKUI.elems.currentPage == page then
+        page.buttonBackground.layout.props.alpha = 0.7
+        page.buttonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.7)
+    else
+        page.buttonBackground.layout.props.alpha = 0.4
+        page.buttonBackground.layout.props.color = OTKUI.art.colorBlack
+    end
+
+    page.buttonBackground:update()
+end
+
 local updateSubPageHelpButtonVisibility
+
+---@class HistoryEntry
+---@field page table
+---@field subPage table
+
+local updateHistoryButtonStates
+
+---@param page table|nil
+---@return table|nil
+local function getLastSubPageOrFirst(page)
+    if not page or type(page.subPages) ~= 'table' then return nil end
+
+    local lastSubPage = page.lastSubPage
+    if lastSubPage then
+        for i = 1, #page.subPages do
+            if page.subPages[i] == lastSubPage then
+                return lastSubPage
+            end
+        end
+    end
+
+    return page.subPages[1]
+end
+
+---@param page table|nil
+---@param subPage table|nil
+---@return HistoryEntry|nil
+local function makeHistoryEntry(page, subPage)
+    if not page or not subPage then return nil end
+    return {
+        page = page,
+        subPage = subPage,
+    }
+end
+
+---@return HistoryEntry|nil
+local function getCurrentHistoryEntry()
+    return makeHistoryEntry(OTKUI.elems.currentPage, OTKUI.elems.currentSubPage)
+end
+
+---@param a HistoryEntry|nil
+---@param b HistoryEntry|nil
+---@return boolean
+local function areHistoryEntriesEqual(a, b)
+    return a ~= nil
+        and b ~= nil
+        and a.page == b.page
+        and a.subPage == b.subPage
+end
+
+---@param stack table
+---@param entry HistoryEntry|nil
+local function pushHistoryEntry(stack, entry)
+    if not entry then return end
+
+    if areHistoryEntriesEqual(stack[#stack], entry) then return end
+
+    stack[#stack + 1] = entry
+
+    while #stack > OTKUI.constants.HISTORY_MAX_ENTRIES do
+        table.remove(stack, 1)
+    end
+end
+
+---@param stack table
+local function clearHistoryStack(stack)
+    for i = #stack, 1, -1 do
+        stack[i] = nil
+    end
+end
+
+---@param page table|nil
+---@param subPage table|nil
+local function recordHistoryNavigation(page, subPage)
+    local targetEntry = makeHistoryEntry(page, subPage)
+    local currentEntry = getCurrentHistoryEntry()
+
+    if not targetEntry or areHistoryEntriesEqual(currentEntry, targetEntry) then return end
+
+    pushHistoryEntry(OTKUI.history.previousHistory, currentEntry)
+    clearHistoryStack(OTKUI.history.forwardHistory)
+
+    if updateHistoryButtonStates then
+        updateHistoryButtonStates()
+    end
+end
+
+---@param direction string
+---@return table
+local function getHistoryStack(direction)
+    if direction == 'previous' then
+        return OTKUI.history.previousHistory
+    end
+
+    return OTKUI.history.forwardHistory
+end
+
+---@param direction string
+---@return boolean
+local function isHistoryAvailable(direction)
+    return #getHistoryStack(direction) > 0
+end
 
 ---@param hasScrollBar boolean
 local function setSubPageScrollBarSpace(hasScrollBar)
@@ -497,8 +636,13 @@ local function setSubPageScrollBarSpace(hasScrollBar)
 end
 
 ---@param subPage table|nil
-local function showSubPage(subPage)
+---@param skipHistory boolean|nil
+local function showSubPage(subPage, skipHistory)
     local previousSubPage = OTKUI.elems.currentSubPage
+
+    if not skipHistory and subPage then
+        recordHistoryNavigation(OTKUI.elems.currentPage, subPage)
+    end
 
     if previousSubPage and previousSubPage ~= subPage and previousSubPage.contentHost then
         previousSubPage.contentHost.layout.props.visible = false
@@ -506,6 +650,10 @@ local function showSubPage(subPage)
     end
 
     OTKUI.elems.currentSubPage = subPage
+
+    if subPage and OTKUI.elems.currentPage then
+        OTKUI.elems.currentPage.lastSubPage = subPage
+    end
 
     if previousSubPage then
         updateSubPageButtonVisual(previousSubPage)
@@ -527,7 +675,16 @@ local function showSubPage(subPage)
 end
 
 ---@param page table
-local function showPage(page)
+---@param subPage table|nil
+---@param skipHistory boolean|nil
+local function showPage(page, subPage, skipHistory)
+    local targetSubPage = subPage or getLastSubPageOrFirst(page)
+    local previousPage = OTKUI.elems.currentPage
+
+    if not skipHistory and targetSubPage then
+        recordHistoryNavigation(page, targetSubPage)
+    end
+
     if OTKUI.elems.currentPage and OTKUI.elems.currentPage.subPageListFlex then
         OTKUI.elems.currentPage.subPageListFlex.layout.props.visible = false
         OTKUI.elems.currentPage.subPageListFlex:update()
@@ -544,6 +701,10 @@ local function showPage(page)
 
     OTKUI.elems.currentPage = page
 
+    if previousPage and previousPage ~= page then
+        updatePageButtonVisual(previousPage)
+    end
+
     setSubPageScrollBarSpace(page and page.hasSubPageScrollBar == true)
 
     if page and page.subPageListFlex then
@@ -551,17 +712,139 @@ local function showPage(page)
         page.subPageListFlex:update()
     end
 
+    if not updateScrollBar then return end
+
     if page and page.subPageScrollBarHost and page.hasSubPageScrollBar then
         page.subPageScrollBarHost.layout.props.visible = true
         page.subPageScrollBarHost:update()
         updateScrollBar(page.subPageListFlex)
     end
 
-    if page and page.subPages and page.subPages[1] then
-        showSubPage(page.subPages[1])
-    else
-        showSubPage(nil)
+    showSubPage(targetSubPage, true)
+    updatePageButtonVisual(page)
+end
+
+---@param entry HistoryEntry|nil
+local function showHistoryEntry(entry)
+    if not entry then return end
+    showPage(entry.page, entry.subPage, true)
+end
+
+local function navigatePreviousHistory()
+    local targetEntry = table.remove(OTKUI.history.previousHistory)
+    if not targetEntry then return end
+
+    pushHistoryEntry(OTKUI.history.forwardHistory, getCurrentHistoryEntry())
+    showHistoryEntry(targetEntry)
+
+    if updateHistoryButtonStates then
+        updateHistoryButtonStates()
     end
+end
+
+local function navigateForwardHistory()
+    local targetEntry = table.remove(OTKUI.history.forwardHistory)
+    if not targetEntry then return end
+
+    pushHistoryEntry(OTKUI.history.previousHistory, getCurrentHistoryEntry())
+    showHistoryEntry(targetEntry)
+
+    if updateHistoryButtonStates then
+        updateHistoryButtonStates()
+    end
+end
+
+---@param button any
+---@param direction string
+---@param baseTexture string
+local function updateHistoryButtonState(button, direction, baseTexture)
+    if not button or not button.layout then return end
+
+    local enabled = isHistoryAvailable(direction)
+    button.layout.props.alpha = enabled and 1 or 0.5
+
+    if not enabled then
+        button.layout.props.resource = getTexture(baseTexture)
+        if button.layout.userData then
+            button.layout.userData.pressed = false
+        end
+    end
+
+    button:update()
+end
+
+updateHistoryButtonStates = function()
+    updateHistoryButtonState(OTKUI.elems.previousHistoryButton, 'previous', 'textures/omw_menu_scroll_left.dds')
+    updateHistoryButtonState(OTKUI.elems.forwardHistoryButton, 'forward', 'textures/omw_menu_scroll_right.dds')
+end
+
+---@param button any
+---@param name string
+---@param direction string
+---@param baseTexture string
+---@param hoverTexture string
+---@param pressedTexture string
+local function registerHistoryButtonEvents(button, name, direction, baseTexture, hoverTexture, pressedTexture)
+    button.layout.events = {
+        focusGain = async:callback(function ()
+            button.layout.userData.focused = true
+            onFrameFunctions[name..'_focusGain'] = function ()
+                if isHistoryAvailable(direction) and not button.layout.userData.pressed then
+                    button.layout.props.resource = getTexture(hoverTexture)
+                    button:update()
+                end
+            end
+        end),
+        focusLoss = async:callback(function ()
+            button.layout.userData.focused = false
+            button.layout.userData.pressed = false
+            onFrameFunctions[name..'_focusLoss'] = function ()
+                button.layout.props.resource = getTexture(baseTexture)
+                button:update()
+            end
+        end),
+        mousePress = async:callback(function (event)
+            if event.button == 1 and isHistoryAvailable(direction) then
+                button.layout.userData.focused = true
+                button.layout.userData.pressed = true
+                onFrameFunctions[name..'_mousePress'] = function ()
+                    button.layout.props.resource = getTexture(pressedTexture)
+                    button:update()
+                end
+            end
+        end),
+        mouseRelease = async:callback(function (event)
+            if event.button ~= 1 then return end
+
+            local shouldActivate = button.layout.userData.pressed
+                and isMouseInsideElement(event, button)
+                and isHistoryAvailable(direction)
+
+            button.layout.userData.pressed = false
+            button.layout.userData.focused = isMouseInsideElement(event, button)
+
+            if shouldActivate then
+                if direction == 'previous' then
+                    navigatePreviousHistory()
+                else
+                    navigateForwardHistory()
+                end
+            end
+
+            onFrameFunctions[name..'_mouseRelease'] = function ()
+                if button.layout.userData.focused and isHistoryAvailable(direction) then
+                    button.layout.props.resource = getTexture(hoverTexture)
+                else
+                    button.layout.props.resource = getTexture(baseTexture)
+                end
+                button:update()
+
+                if updateHistoryButtonStates then
+                    updateHistoryButtonStates()
+                end
+            end
+        end),
+    }
 end
 
 ---@param subPage table
@@ -771,6 +1054,8 @@ local function buildSubPages(page, subpageListWidget, subpageListHostWidget, sub
         subpageListFlex.layout.content:add(buildSubPageButton(page, subPage, subpageListWidget))
     end
 
+    if not addScrollBar then return end
+
     page.hasSubPageScrollBar = addScrollBar(
         subpageScrollBarHost,
         subpageListFlex,
@@ -839,6 +1124,7 @@ local function buildPageList(pageFlex, pageListHost)
             }
 
             pageWidget.layout.content:add(pageBackground)
+            page.buttonBackground = pageBackground
 
             pageWidget.layout.content:add(pageText)
 
@@ -851,32 +1137,41 @@ local function buildPageList(pageFlex, pageListHost)
                     alpha = 0,
                 },
                 content = ui.content {},
+                userData = {
+                    focused = false,
+                    pressed = false,
+                },
                 events = {},
             }
             
             clickBox.layout.events = {
                 focusGain = async:callback(function ()
+                    clickBox.layout.userData.focused = true
                     onFrameFunctions[page.name..'_focusGain'] = function ()
                         if scrollableWindow == nil then
                             setScrollTarget(pageFlex, pageListHost, getPageListSize())
                         end
-                        pageBackground.layout.props.alpha = 0.6
-                        pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.4)
-                        pageBackground:update()
+                        if OTKUI.elems.currentPage ~= page and not clickBox.layout.userData.pressed then
+                            pageBackground.layout.props.alpha = 0.6
+                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.4)
+                            pageBackground:update()
+                        end
                     end
                 end),
                 focusLoss = async:callback(function ()
+                    clickBox.layout.userData.focused = false
+                    clickBox.layout.userData.pressed = false
                     onFrameFunctions[page.name..'_focusLoss'] = function ()
                         if scrollableWindow ~= nil then
                             clearScrollTarget(pageFlex)
                         end
-                        pageBackground.layout.props.alpha = 0.4
-                        pageBackground.layout.props.color = OTKUI.art.colorBlack
-                        pageBackground:update()
+                        updatePageButtonVisual(page)
                     end
                 end),
                 mousePress = async:callback(function (event)
                     if event.button == 1 then
+                        clickBox.layout.userData.focused = true
+                        clickBox.layout.userData.pressed = true
                         onFrameFunctions[page.name..'_mousePress'] = function ()
                             pageBackground.layout.props.alpha = 0.9
                             pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.9)
@@ -885,12 +1180,25 @@ local function buildPageList(pageFlex, pageListHost)
                     end
                 end),
                 mouseRelease = async:callback(function (event)
-                    if event.button == 1 then
-                        onFrameFunctions[page.name..'_mouseRelease'] = function ()
-                            pageBackground.layout.props.alpha = 0.7
-                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.7)
-                            pageBackground:update()
+                    if event.button ~= 1 then return end
+
+                    local mouseIsInside = isMouseInsideElement(event, pageWidget)
+                    local shouldActivate = clickBox.layout.userData.pressed
+                        and mouseIsInside
+
+                    clickBox.layout.userData.pressed = false
+                    clickBox.layout.userData.focused = mouseIsInside
+
+                    onFrameFunctions[page.name..'_mouseRelease'] = function ()
+                        if shouldActivate then
                             showPage(page)
+                            updatePageButtonVisual(page)
+                        elseif clickBox.layout.userData.focused and OTKUI.elems.currentPage ~= page then
+                            pageBackground.layout.props.alpha = 0.6
+                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.4)
+                            pageBackground:update()
+                        else
+                            updatePageButtonVisual(page)
                         end
                     end
                 end)
@@ -1019,11 +1327,13 @@ addScrollBar = function (scrollBarHost, flexElem, flexHost, contentSize, options
     local thumbTop = nil
     local thumbBottom = nil
 
+    --[[
     if not scrollMetrics.isHorizontal then
         -- Adds Thumb tops and bottoms to vertical scroll bars
         -- Disabled for now because it looks ugly and is unnecessary
-        --thumbTop, thumbBottom = addThumbCaps(scrollBarThumb, thickness)
+        thumbTop, thumbBottom = addThumbCaps(scrollBarThumb, thickness)
     end
+    ]]--
 
     scrollBarWidget.layout.content:add(scrollBarThumb)
     scrollBarHost.layout.content:add(scrollBarWidget)
@@ -1165,7 +1475,9 @@ local function registerTextTooltip()
             textColor = OTKUI.art.morrowindLight,
             textShadow = true,
             textShadowColor = OTKUI.art.colorBlack,
-            textSize = 14,
+            textSize = OTKUI.constants.TOOLTIP_TEXT_SIZE,
+            multiline = true,
+            --wordWrap = true,
         }
     }
     OTKUI.elems.tooltip.hostWidget.layout.content:add(OTKUI.elems.tooltip.tooltipText)
@@ -1189,8 +1501,37 @@ local function registerTooltip()
     registerTextTooltip()
 end
 
+---@param text string
+---@param maxCharsPerLine number
+---@return string
+local function wrapTooltipText(text, maxCharsPerLine)
+    if type(text) ~= 'string' then return '' end
+    if type(maxCharsPerLine) ~= 'number' or maxCharsPerLine <= 0 then return text end
+
+    local wrappedLines = {}
+
+    for sourceLine in (text .. '\n'):gmatch('(.-)\n') do
+        local currentLine = ''
+
+        for word in sourceLine:gmatch('%S+') do
+            if currentLine == '' then
+                currentLine = word
+            elseif #currentLine + 1 + #word <= maxCharsPerLine then
+                currentLine = currentLine .. ' ' .. word
+            else
+                wrappedLines[#wrappedLines + 1] = currentLine
+                currentLine = word
+            end
+        end
+
+        wrappedLines[#wrappedLines + 1] = currentLine
+    end
+
+    return table.concat(wrappedLines, '\n')
+end
+
 local function updateTextTooltip(text, mousePosition)
-    OTKUI.elems.tooltip.tooltipText.layout.props.text = text
+    OTKUI.elems.tooltip.tooltipText.layout.props.text = wrapTooltipText(text, OTKUI.constants.TOOLTIP_MAX_CHARS_PER_LINE)
     OTKUI.elems.tooltip.tooltipText:update()
 
     OTKUI.elems.tooltip.hostWidget.layout.props.position = mousePosition + v2(16, 16)
@@ -1208,16 +1549,15 @@ local function clearTextTooltip()
 end
 
 updateSubPageHelpButtonVisibility = function()
-    local subpageHelpButton = OTKUI.elems.subpageHelpButton
-    if not subpageHelpButton or not subpageHelpButton.layout then return end
+    if not OTKUI.elems.subpageHelpButton or not OTKUI.elems.subpageHelpButton.layout then return end
 
     local currentSubPage = OTKUI.elems.currentSubPage
     local tooltip = currentSubPage and currentSubPage.tooltip
     local hasTooltip = type(tooltip) == 'string' and tooltip ~= ''
 
     OTKUI.elems.tooltip.currentTooltip = hasTooltip and tooltip or nil
-    subpageHelpButton.layout.props.visible = hasTooltip
-    subpageHelpButton:update()
+    OTKUI.elems.subpageHelpButton.layout.props.visible = hasTooltip
+    OTKUI.elems.subpageHelpButton:update()
 
     if not hasTooltip and OTKUI.elems.tooltip.hostWidget then
         clearTextTooltip()
@@ -1232,6 +1572,8 @@ local function buildMenu()
     OTKUI.elems.subPageListScrollBarStackWidget = nil
     OTKUI.elems.subPageContentStackWidget = nil
     OTKUI.elems.subPageContentBaseSize = nil
+    OTKUI.elems.previousHistoryButton = nil
+    OTKUI.elems.forwardHistoryButton = nil
 
     -- Variables used to scale assets by screen size
     local screenSize = ui.layers[2].size
@@ -1314,15 +1656,29 @@ local function buildMenu()
         name = 'previousButton',
         type = ui.TYPE.Image,
         props = {
-            resource = ui.texture{ path = 'textures/omw_menu_scroll_left.dds' },
-            size = v2(24, 24), -- Double the size of the image
+            resource = getTexture('textures/omw_menu_scroll_left.dds'),
+            size = OTKUI.constants.HISTORY_BUTTON_SIZE, -- Double the size of the image
             anchor = v2(0.5, 0.5),
             relativePosition = v2(0, 0.5),
             position = v2(16, 0), -- Nudge it over
             alpha = 0.5, -- Starts dimmed with no History to go back to
-
-        }
+        },
+        userData = {
+            focused = false,
+            pressed = false,
+        },
+        events = {},
     }
+
+    OTKUI.elems.previousHistoryButton = previousButton
+    registerHistoryButtonEvents(
+        previousButton,
+        'previousButton',
+        'previous',
+        'textures/omw_menu_scroll_left.dds',
+        'textures/nibby/omw_menu_scroll_left_hover.dds',
+        'textures/nibby/omw_menu_scroll_left_pressed.dds'
+    )
     topBarWidget.layout.content:add(previousButton)
 
     -- Forward History button
@@ -1331,14 +1687,29 @@ local function buildMenu()
         type = ui.TYPE.Image,
         props = {
             resource = getTexture('textures/omw_menu_scroll_right.dds'),
-            size = v2(24, 24),
+            size = OTKUI.constants.HISTORY_BUTTON_SIZE,
             anchor = v2(0.5, 0.5),
             relativePosition = v2(0, 0.5),
-            position = v2(48, 0), -- Nudge it over by twice its size (accounts for Prev button)
+            position = v2(48, 0), -- Nudge it over (accounts for Prev button)
             alpha = 0.5, -- Starts dimmed with no History to go forward to
-        }
+        },
+        userData = {
+            focused = false,
+            pressed = false,
+        },
+        events = {},
     }
+    OTKUI.elems.forwardHistoryButton = forwardButton
+    registerHistoryButtonEvents(
+        forwardButton,
+        'forwardButton',
+        'forward',
+        'textures/omw_menu_scroll_right.dds',
+        'textures/nibby/omw_menu_scroll_right_hover.dds',
+        'textures/nibby/omw_menu_scroll_right_pressed.dds'
+    )
     topBarWidget.layout.content:add(forwardButton)
+    updateHistoryButtonStates()
 
     -- Exit Menu button
     local exitButton = ui.create {
@@ -1781,21 +2152,20 @@ local function buildMenu()
         },
         events = {},
     }
-    local subpageHelpButton = OTKUI.elems.subpageHelpButton
 
     registerTooltip()
 
-    subpageHelpButton.layout.events = {
+    OTKUI.elems.subpageHelpButton.layout.events = {
         focusGain = async:callback(function ()
             onFrameFunctions['subpageHelp_focusGain'] = function ()
-                subpageHelpButton.layout.props.resource = getTexture('icons/m/tx_scroll_open_01.dds')
-                subpageHelpButton:update()
+                OTKUI.elems.subpageHelpButton.layout.props.resource = getTexture('icons/m/tx_scroll_open_01.dds')
+                OTKUI.elems.subpageHelpButton:update()
             end
         end),
         focusLoss = async:callback(function ()
             onFrameFunctions['subpageHelp_focusLoss'] = function ()
-                subpageHelpButton.layout.props.resource = getTexture('textures/nibby/tx_scroll_01_outline.dds')
-                subpageHelpButton:update()
+                OTKUI.elems.subpageHelpButton.layout.props.resource = getTexture('textures/nibby/tx_scroll_01_outline.dds')
+                OTKUI.elems.subpageHelpButton:update()
                 clearTextTooltip()
             end
         end),
