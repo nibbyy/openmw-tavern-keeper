@@ -1,0 +1,157 @@
+---
+ High Elf:
+ # No surname
+  name:
+   female:
+    - Anirne
+    - Ardarume
+    - Calmaninde
+   male:
+    - Aldaril
+    - Anarenen
+    - Andil
+ Argonian:
+ # No surname
+  name:
+   female:
+    jel:
+     - Ahaht
+     - Akish
+     - Banalz
+    imp:
+     - Breech-Star
+     - Snail-Tail
+     - Tern-Feather
+     - Travelling-New-Woman
+   male:
+    jel:
+     - Asum
+     - Bunish
+     - Busheeus
+    imp:
+     - Also-He-Washes
+     - Basks-In-The-Sun
+     - Big Head
+ Wood Elf:
+ # No surname
+  name:
+   female:
+    - Aerin
+    - Aglaril
+    - Anrel
+   male:
+    - Aengoth
+    - Agarond
+    - Allimir
+ Breton:
+  first_name:
+   female:
+    - Abelle
+    - Aditte
+    - Ales
+   male:
+    - Alodie
+    - Andre
+    - Arnand
+  surname:
+   - Acques
+   - Adrard
+   - Adrognese
+ Dark Elf:
+ # Dark elves are either settlers (Great Houses) or Ashlanders
+  settler:
+   first_name:
+    female:
+     - Mehra
+     - Daynasa
+     - Daynila
+    male:
+     - Ano
+     - Galos
+     - Anes
+   surname:
+    - Andrano
+    - Andrethi
+    - Ienith
+  ashlander:
+   first_name:
+    female:
+     - Mamaea
+     - Manirai
+     - Manu
+    male:
+     - Mausur
+     - Ainab
+     - Maeonius
+   surname:
+    - Vabdas
+    - Almu
+    - Man-llu
+ Imperial:
+  first_name:
+   female:
+    - Adraria
+    - Agrippina
+    - Ahetotis
+   male:
+    - Aebondeius
+    - Afer
+    - Albecius
+  surname:
+  # Imperial surnames are either unisex or use a root and gendered suffix of (-a): feminine | (-us): masculine
+   unisex:
+    - Albarnian
+    - Albuttian
+    - Amnis
+   root:
+    - Atri
+    - Cadius
+    - Faust
+ Khajiit:
+ # No surname
+  name:
+   female:
+    - Abanji
+    - Adanja
+    - Addhiranirr
+   male:
+    - Baadargo
+    - Dro'Barri
+    - Dro'farahn
+ Nord:
+ # No surname
+  name:
+   female:
+    - Aeta
+    - Aldi
+    - Anja
+   male:
+    - Abbard
+    - Adding
+    - Aenar
+ Orc:
+  first_name:
+   female:
+    - Agrob
+    - Badbog
+    - Bashuk
+   male:
+    - Moghakh
+    - Atulg
+    - Azuk
+  surname:
+   - Agadbu
+   - Aglakh
+   - Agum
+ Redguard:
+ # No surname
+  name:
+   female:
+    - Alusannah
+    - Ancola
+    - Anora
+   male:
+    - Achel
+    - Alusaron
+    - Bodean
+...

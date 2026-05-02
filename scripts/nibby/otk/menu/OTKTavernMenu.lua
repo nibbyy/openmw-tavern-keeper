@@ -120,6 +120,7 @@ local function darkenColor(color, multiplier)
 end
 
 -- Function called to close the menu
+---@return nil
 local function closeMenu()
     if not isRootVisible() then return end
 
@@ -166,6 +167,8 @@ local function isMouseInsideElement(event, elem)
 end
 
 -- Called per Page to register subpages
+---@param subPage table
+---@return boolean
 local function registerSubPage(subPage)
     if type(subPage) ~= 'table' then
         print('[OTK - ERR] OTKTavernMenu.registerSubPage expected Subpage Table, got: ' .. tostring(type(subPage)))
@@ -229,15 +232,18 @@ end
 ---@field name string -- Returned name string from module
 ---@field label string -- Returned text string from module
 ---@field index integer -- Returned index integer from module
----@field subPages table -- Ordered subpage records
----@field lastSubPage table|nil -- Most recently viewed subpage on this page
+---@field subPages TavernSubPage[] -- Ordered subpage records
+---@field lastSubPage TavernSubPage|nil -- Most recently viewed subpage on this page
 ---@field buttonBackground any|nil -- Page button background image
+---@field subPageListFlex any|nil -- UI element for this page's subpage button row
 
 ---@class TavernSubPage
 ---@field name string
 ---@field type string
 ---@field content string|nil
 ---@field tooltip string|nil
+---@field buttonBackground any|nil -- Subpage button background image
+---@field contentWidget any|nil -- Subpage content UI element
 
 -- Normalizes page data loaded from YAML into the same shape the UI expects
 ---@param fileName string
@@ -289,6 +295,7 @@ local function registerPage(page)
 end
 
 -- Function called to load Page .yaml files
+---@return nil
 local function loadPageFiles()
     OTKUI.pages.list = {}
     OTKUI.pages.count = 0
@@ -730,6 +737,7 @@ local function showHistoryEntry(entry)
     showPage(entry.page, entry.subPage, true)
 end
 
+---@return nil
 local function navigatePreviousHistory()
     local targetEntry = table.remove(OTKUI.history.previousHistory)
     if not targetEntry then return end
@@ -742,6 +750,7 @@ local function navigatePreviousHistory()
     end
 end
 
+---@return nil
 local function navigateForwardHistory()
     local targetEntry = table.remove(OTKUI.history.forwardHistory)
     if not targetEntry then return end
@@ -773,6 +782,7 @@ local function updateHistoryButtonState(button, direction, baseTexture)
     button:update()
 end
 
+---@return nil
 updateHistoryButtonStates = function()
     updateHistoryButtonState(OTKUI.elems.previousHistoryButton, 'previous', 'textures/omw_menu_scroll_left.dds')
     updateHistoryButtonState(OTKUI.elems.forwardHistoryButton, 'forward', 'textures/omw_menu_scroll_right.dds')
@@ -1466,6 +1476,7 @@ local function exitButtonLogic(elem, texturePath, shouldClose)
     end
 end
 
+---@return nil
 local function registerTextTooltip()
     OTKUI.elems.tooltip.tooltipText = ui.create {
         name = 'textTooltipText',
@@ -1483,6 +1494,7 @@ local function registerTextTooltip()
     OTKUI.elems.tooltip.hostWidget.layout.content:add(OTKUI.elems.tooltip.tooltipText)
 end
 
+---@return nil
 local function registerTooltip()
     OTKUI.elems.tooltip.hostWidget = ui.create {
         name = 'textTooltipWidget',
@@ -1530,6 +1542,9 @@ local function wrapTooltipText(text, maxCharsPerLine)
     return table.concat(wrappedLines, '\n')
 end
 
+---@param text string
+---@param mousePosition any util.vector2
+---@return nil
 local function updateTextTooltip(text, mousePosition)
     OTKUI.elems.tooltip.tooltipText.layout.props.text = wrapTooltipText(text, OTKUI.constants.TOOLTIP_MAX_CHARS_PER_LINE)
     OTKUI.elems.tooltip.tooltipText:update()
@@ -1539,6 +1554,7 @@ local function updateTextTooltip(text, mousePosition)
     OTKUI.elems.tooltip.hostWidget:update()
 end
 
+---@return nil
 local function clearTextTooltip()
     OTKUI.elems.tooltip.tooltipText.layout.props.text = ''
     OTKUI.elems.tooltip.tooltipText:update()
@@ -1548,6 +1564,7 @@ local function clearTextTooltip()
     OTKUI.elems.tooltip.hostWidget:update()
 end
 
+---@return nil
 updateSubPageHelpButtonVisibility = function()
     if not OTKUI.elems.subpageHelpButton or not OTKUI.elems.subpageHelpButton.layout then return end
 
@@ -1565,6 +1582,7 @@ updateSubPageHelpButtonVisibility = function()
 end
 
 -- Called to construct the menu
+---@return nil
 local function buildMenu()
     print('[OTK] OTKTavernMenu.buildMenu: Building the Tavern Menu!')
     OTKUI.elems.currentPage = nil
@@ -2188,6 +2206,7 @@ local function buildMenu()
 end
 
 -- Function called to open the menu
+---@return nil
 local function openMenu()
     if isRootVisible() then return end
 
@@ -2208,6 +2227,7 @@ local function openMenu()
 end
 
 -- Function called by Trigger keybind to open/close the menu
+---@return nil
 local function toggleMenu()
     if isRootVisible() then
         onFrameFunctions['closeMenu'] = closeMenu -- Add it to our onFrame functions to avoid Delayed Action problems
@@ -2220,6 +2240,8 @@ end
 input.registerTriggerHandler('otk_openmenu', async:callback(toggleMenu)) -- Calls toggleMenu()
 
 -- Checks for Escape key to close menu
+---@param key any OpenMW key event data
+---@return nil
 local function onKeyPress(key)
     if isRootVisible() and key.code == input.KEY.Escape then
         onFrameFunctions['closeMenu'] = closeMenu
@@ -2227,6 +2249,8 @@ local function onKeyPress(key)
 end
 
 -- Right Click checker to close menu
+---@param button integer Mouse button id
+---@return nil
 local function onMouseButtonPress(button)
     if isRootVisible() and button == 3 then -- '3' = right click
         onFrameFunctions['closeMenu'] = closeMenu
@@ -2234,6 +2258,8 @@ local function onMouseButtonPress(button)
 end
 
 -- onFrame is used to call Functions from buttons
+---@param dt number Time since last frame
+---@return nil
 local function onFrame(dt)
     if not isRootVisible() then return end
 
@@ -2246,6 +2272,9 @@ local function onFrame(dt)
 end
 
 -- Mouse wheel behavior
+---@param vertical number Vertical wheel delta
+---@param horizontal number Horizontal wheel delta
+---@return nil
 local function onMouseWheel(vertical, horizontal)
     if not isRootVisible() or not scrollableWindow then return end -- Only in our UI; only in a scrollable window
 
@@ -2261,10 +2290,12 @@ local function onMouseWheel(vertical, horizontal)
     end
 end
 
+---@return nil
 local function onLoad()
     buildMenu()
 end
 
+---@return nil
 local function onInit()
     buildMenu()
 end

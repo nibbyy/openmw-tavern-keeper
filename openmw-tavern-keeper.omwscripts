@@ -2,3 +2,10 @@ MENU: scripts/nibby/otk/config/OTKConfigPages.lua
 MENU: scripts/nibby/otk/config/OTKConfigHotkey.lua
 
 PLAYER: scripts/nibby/otk/menu/OTKTavernMenu.lua
+PLAYER: scripts/nibby/otk/player/OTKCellChecker.lua
+
+CUSTOM: scripts/nibby/otk/custom/OTKLedger.lua
+
+GLOBAL: scripts/nibby/otk/global/OTKCustomAttacher.lua
+GLOBAL: scripts/nibby/otk/npcs/OTKBodyParts.lua
+GLOBAL: scripts/nibby/otk/npcs/OTKNPCSpawner.lua
