@@ -3,6 +3,7 @@ local self = require('openmw.self')
 
 local variables = require('scripts.nibby.otk.OTKVariables')
 
+-- Checks whether the player is in the tavern, then tells the global script if setup should run.
 ---@return nil
 local function checkCell()
     local cell = self.cell.name

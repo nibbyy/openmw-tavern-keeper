@@ -150,6 +150,7 @@ local function addOnFrameFunction(key, func)
     onFrameFunctions[key] = func
 end
 
+-- Checks whether a mouse event happened inside a particular UI element.
 ---@param event table|nil -- Mouse event data from OpenMW UI
 ---@param elem any -- UI element receiving the event
 ---@return boolean -- True if the mouse position is inside elem's bounds
@@ -198,9 +199,10 @@ local function registerSubPage(subPage)
     return false
 end
 
----@param subPages table|nil
----@param pageName string
----@return table
+-- Cleans up raw subpage data from YAML and skips entries that are not valid.
+---@param subPages table|nil Raw subpage list from YAML
+---@param pageName string Page name used in error messages
+---@return TavernSubPage[] subPages Normalized subpage list
 local function normalizeSubPages(subPages, pageName)
     local normalized = {}
 
@@ -228,27 +230,29 @@ local function normalizeSubPages(subPages, pageName)
     return normalized
 end
 
+-- One main button/page in the tavern menu, loaded from a YAML page file.
 ---@class TavernPage
----@field name string -- Returned name string from module
----@field label string -- Returned text string from module
----@field index integer -- Returned index integer from module
+---@field name string Internal page name from YAML
+---@field label string Text shown on the main page button
+---@field index integer Display order in the page list
 ---@field subPages TavernSubPage[] -- Ordered subpage records
 ---@field lastSubPage TavernSubPage|nil -- Most recently viewed subpage on this page
 ---@field buttonBackground any|nil -- Page button background image
 ---@field subPageListFlex any|nil -- UI element for this page's subpage button row
 
+-- One smaller tab inside a main tavern menu page.
 ---@class TavernSubPage
----@field name string
----@field type string
----@field content string|nil
----@field tooltip string|nil
+---@field name string Text shown on the subpage tab
+---@field type string Content kind, currently "text"
+---@field content string|nil Body text for text subpages
+---@field tooltip string|nil Optional help text shown from the scroll icon
 ---@field buttonBackground any|nil -- Subpage button background image
 ---@field contentWidget any|nil -- Subpage content UI element
 
 -- Normalizes page data loaded from YAML into the same shape the UI expects
----@param fileName string
----@param page table
----@return TavernPage|nil
+---@param fileName string YAML file name, used in error messages
+---@param page table Raw decoded YAML page data
+---@return TavernPage|nil page Normalized page data, or nil if the YAML was not a table
 local function normalizePageData(fileName, page)
     if type(page) ~= 'table' then
         print('[OTK - ERR] OTKTavernMenu.normalizePageData expected Page table from YAML in ' .. tostring(fileName) .. ', got: ' .. tostring(type(page)))
@@ -489,7 +493,8 @@ local function clearScrollTarget(flexElem)
     end
 end
 
----@param subPage table
+-- Refreshes one subpage button so the selected tab looks active.
+---@param subPage TavernSubPage Subpage whose button should be refreshed
 local function updateSubPageButtonVisual(subPage)
     if not subPage or not subPage.buttonBackground then return end
 
@@ -504,7 +509,8 @@ local function updateSubPageButtonVisual(subPage)
     subPage.buttonBackground:update()
 end
 
----@param page table
+-- Refreshes one main page button so the selected page stands out.
+---@param page TavernPage Page whose button should be refreshed
 local function updatePageButtonVisual(page)
     if not page or not page.buttonBackground then return end
 
@@ -521,14 +527,16 @@ end
 
 local updateSubPageHelpButtonVisibility
 
+-- One "where was I?" item for the back/forward buttons.
 ---@class HistoryEntry
----@field page table
----@field subPage table
+---@field page TavernPage Page that was being viewed
+---@field subPage TavernSubPage Subpage that was being viewed
 
 local updateHistoryButtonStates
 
----@param page table|nil
----@return table|nil
+-- Remembers the last subpage used on a page, falling back to the first subpage.
+---@param page TavernPage|nil Page to inspect
+---@return TavernSubPage|nil subPage Last viewed subpage, first subpage, or nil
 local function getLastSubPageOrFirst(page)
     if not page or type(page.subPages) ~= 'table' then return nil end
 
@@ -544,9 +552,10 @@ local function getLastSubPageOrFirst(page)
     return page.subPages[1]
 end
 
----@param page table|nil
----@param subPage table|nil
----@return HistoryEntry|nil
+-- Builds a history entry only when both halves exist.
+---@param page TavernPage|nil Page to store
+---@param subPage TavernSubPage|nil Subpage to store
+---@return HistoryEntry|nil entry Complete history entry, or nil
 local function makeHistoryEntry(page, subPage)
     if not page or not subPage then return nil end
     return {
@@ -555,14 +564,16 @@ local function makeHistoryEntry(page, subPage)
     }
 end
 
----@return HistoryEntry|nil
+-- Captures the page/subpage currently on screen.
+---@return HistoryEntry|nil entry Current page location, or nil if none is selected
 local function getCurrentHistoryEntry()
     return makeHistoryEntry(OTKUI.elems.currentPage, OTKUI.elems.currentSubPage)
 end
 
----@param a HistoryEntry|nil
----@param b HistoryEntry|nil
----@return boolean
+-- Checks whether two history entries point at the same visible page.
+---@param a HistoryEntry|nil First entry to compare
+---@param b HistoryEntry|nil Second entry to compare
+---@return boolean areEqual True when both entries point to the same page and subpage
 local function areHistoryEntriesEqual(a, b)
     return a ~= nil
         and b ~= nil
@@ -570,8 +581,9 @@ local function areHistoryEntriesEqual(a, b)
         and a.subPage == b.subPage
 end
 
----@param stack table
----@param entry HistoryEntry|nil
+-- Adds a history item without repeating the current top entry.
+---@param stack HistoryEntry[] Back or forward history stack
+---@param entry HistoryEntry|nil Entry to add
 local function pushHistoryEntry(stack, entry)
     if not entry then return end
 
@@ -584,15 +596,17 @@ local function pushHistoryEntry(stack, entry)
     end
 end
 
----@param stack table
+-- Clears a history stack in-place so existing references still point to the same table.
+---@param stack HistoryEntry[] Back or forward history stack
 local function clearHistoryStack(stack)
     for i = #stack, 1, -1 do
         stack[i] = nil
     end
 end
 
----@param page table|nil
----@param subPage table|nil
+-- Records page changes so the back button knows where to return.
+---@param page TavernPage|nil Destination page
+---@param subPage TavernSubPage|nil Destination subpage
 local function recordHistoryNavigation(page, subPage)
     local targetEntry = makeHistoryEntry(page, subPage)
     local currentEntry = getCurrentHistoryEntry()
@@ -607,8 +621,9 @@ local function recordHistoryNavigation(page, subPage)
     end
 end
 
----@param direction string
----@return table
+-- Chooses the correct history stack for a back or forward action.
+---@param direction string "previous" for back history, anything else for forward history
+---@return HistoryEntry[] stack Requested history stack
 local function getHistoryStack(direction)
     if direction == 'previous' then
         return OTKUI.history.previousHistory
@@ -617,13 +632,15 @@ local function getHistoryStack(direction)
     return OTKUI.history.forwardHistory
 end
 
----@param direction string
----@return boolean
+-- Tells the UI whether a back/forward button should be usable.
+---@param direction string History direction to check
+---@return boolean isAvailable True when that direction has somewhere to go
 local function isHistoryAvailable(direction)
     return #getHistoryStack(direction) > 0
 end
 
----@param hasScrollBar boolean
+-- Makes room for the horizontal subpage scrollbar only when the current page needs it.
+---@param hasScrollBar boolean True when the subpage button row is scrollable
 local function setSubPageScrollBarSpace(hasScrollBar)
     local scrollBarStack = OTKUI.elems.subPageListScrollBarStackWidget
     local contentStack = OTKUI.elems.subPageContentStackWidget
@@ -642,8 +659,9 @@ local function setSubPageScrollBarSpace(hasScrollBar)
     contentStack:update()
 end
 
----@param subPage table|nil
----@param skipHistory boolean|nil
+-- Shows one subpage's content and hides the previously selected subpage.
+---@param subPage TavernSubPage|nil Subpage to show
+---@param skipHistory boolean|nil True when navigation history should not be changed
 local function showSubPage(subPage, skipHistory)
     local previousSubPage = OTKUI.elems.currentSubPage
 
@@ -681,9 +699,10 @@ local function showSubPage(subPage, skipHistory)
     updateSubPageButtonVisual(subPage)
 end
 
----@param page table
----@param subPage table|nil
----@param skipHistory boolean|nil
+-- Shows a main page, its subpage row, and whichever subpage should be active.
+---@param page TavernPage Page to show
+---@param subPage TavernSubPage|nil Specific subpage to show, or nil to use the remembered one
+---@param skipHistory boolean|nil True when navigation history should not be changed
 local function showPage(page, subPage, skipHistory)
     local targetSubPage = subPage or getLastSubPageOrFirst(page)
     local previousPage = OTKUI.elems.currentPage
@@ -731,12 +750,14 @@ local function showPage(page, subPage, skipHistory)
     updatePageButtonVisual(page)
 end
 
----@param entry HistoryEntry|nil
+-- Re-opens a page/subpage pair from the history stack.
+---@param entry HistoryEntry|nil History entry to show
 local function showHistoryEntry(entry)
     if not entry then return end
     showPage(entry.page, entry.subPage, true)
 end
 
+-- Moves one step backward through page history.
 ---@return nil
 local function navigatePreviousHistory()
     local targetEntry = table.remove(OTKUI.history.previousHistory)
@@ -750,6 +771,7 @@ local function navigatePreviousHistory()
     end
 end
 
+-- Moves one step forward after the player has gone backward.
 ---@return nil
 local function navigateForwardHistory()
     local targetEntry = table.remove(OTKUI.history.forwardHistory)
@@ -763,9 +785,10 @@ local function navigateForwardHistory()
     end
 end
 
----@param button any
----@param direction string
----@param baseTexture string
+-- Enables or fades a history button depending on whether it can be used.
+---@param button any UI image button to update
+---@param direction string History direction this button represents
+---@param baseTexture string Normal texture path for the button
 local function updateHistoryButtonState(button, direction, baseTexture)
     if not button or not button.layout then return end
 
@@ -782,18 +805,20 @@ local function updateHistoryButtonState(button, direction, baseTexture)
     button:update()
 end
 
+-- Refreshes both history buttons after a page change.
 ---@return nil
 updateHistoryButtonStates = function()
     updateHistoryButtonState(OTKUI.elems.previousHistoryButton, 'previous', 'textures/omw_menu_scroll_left.dds')
     updateHistoryButtonState(OTKUI.elems.forwardHistoryButton, 'forward', 'textures/omw_menu_scroll_right.dds')
 end
 
----@param button any
----@param name string
----@param direction string
----@param baseTexture string
----@param hoverTexture string
----@param pressedTexture string
+-- Wires hover, press, and release behavior for a back/forward button.
+---@param button any UI image button
+---@param name string Stable name used for onFrame callback keys
+---@param direction string "previous" or "forward"
+---@param baseTexture string Normal texture path
+---@param hoverTexture string Hover texture path
+---@param pressedTexture string Pressed texture path
 local function registerHistoryButtonEvents(button, name, direction, baseTexture, hoverTexture, pressedTexture)
     button.layout.events = {
         focusGain = async:callback(function ()
@@ -857,8 +882,9 @@ local function registerHistoryButtonEvents(button, name, direction, baseTexture,
     }
 end
 
----@param subPage table
----@param contentHost any
+-- Builds a simple text-only subpage body.
+---@param subPage TavernSubPage Subpage data from YAML
+---@param contentHost any UI element that will hold the text
 local function buildTextSubPage(subPage, contentHost)
     local subpageHostFlex = ui.create {
         name = subPage.name..'_subPageHostFlex',
@@ -889,10 +915,11 @@ local function buildTextSubPage(subPage, contentHost)
     subpageHostFlex.layout.content:add(subpageText)
 end
 
----@param page table
----@param subPage table
----@param subpageListWidget any
----@return any
+-- Builds the clickable tab button for one subpage.
+---@param page TavernPage Parent page
+---@param subPage TavernSubPage Subpage this button opens
+---@param subpageListWidget any UI element that controls button sizing
+---@return any subpageButton UI button element
 local function buildSubPageButton(page, subPage, subpageListWidget)
     local subpageButton = ui.create {
         name = page.name..'_'..subPage.name..'_subPageButton',
@@ -989,11 +1016,12 @@ local function buildSubPageButton(page, subPage, subpageListWidget)
     return subpageButton
 end
 
----@param page table
----@param subpageListWidget any
----@param subpageListHostWidget any
----@param subpageListScrollBarStackWidget any
----@param subpageContentStackWidget any
+-- Builds all subpage buttons and content panes for one main page.
+---@param page TavernPage Page whose subpages are being built
+---@param subpageListWidget any UI element that frames the subpage buttons
+---@param subpageListHostWidget any UI element that clips the scrolling button row
+---@param subpageListScrollBarStackWidget any UI element that holds the horizontal scrollbar
+---@param subpageContentStackWidget any UI element that holds subpage content panes
 local function buildSubPages(page, subpageListWidget, subpageListHostWidget, subpageListScrollBarStackWidget, subpageContentStackWidget)
     if type(page.subPages) ~= 'table' then return end
 
@@ -1476,6 +1504,7 @@ local function exitButtonLogic(elem, texturePath, shouldClose)
     end
 end
 
+-- Creates the text element that lives inside the tooltip box.
 ---@return nil
 local function registerTextTooltip()
     OTKUI.elems.tooltip.tooltipText = ui.create {
@@ -1494,6 +1523,7 @@ local function registerTextTooltip()
     OTKUI.elems.tooltip.hostWidget.layout.content:add(OTKUI.elems.tooltip.tooltipText)
 end
 
+-- Creates the floating tooltip box used by subpage help.
 ---@return nil
 local function registerTooltip()
     OTKUI.elems.tooltip.hostWidget = ui.create {
@@ -1513,9 +1543,10 @@ local function registerTooltip()
     registerTextTooltip()
 end
 
----@param text string
----@param maxCharsPerLine number
----@return string
+-- Adds line breaks to tooltip text so it does not become one long line.
+---@param text string Tooltip text to wrap
+---@param maxCharsPerLine number Preferred maximum characters per line
+---@return string wrappedText Text with newline breaks inserted
 local function wrapTooltipText(text, maxCharsPerLine)
     if type(text) ~= 'string' then return '' end
     if type(maxCharsPerLine) ~= 'number' or maxCharsPerLine <= 0 then return text end
@@ -1542,8 +1573,9 @@ local function wrapTooltipText(text, maxCharsPerLine)
     return table.concat(wrappedLines, '\n')
 end
 
----@param text string
----@param mousePosition any util.vector2
+-- Moves the tooltip near the mouse and fills it with the current help text.
+---@param text string Tooltip text to show
+---@param mousePosition any util.vector2 current mouse position
 ---@return nil
 local function updateTextTooltip(text, mousePosition)
     OTKUI.elems.tooltip.tooltipText.layout.props.text = wrapTooltipText(text, OTKUI.constants.TOOLTIP_MAX_CHARS_PER_LINE)
@@ -1554,6 +1586,7 @@ local function updateTextTooltip(text, mousePosition)
     OTKUI.elems.tooltip.hostWidget:update()
 end
 
+-- Hides the tooltip and clears its old text.
 ---@return nil
 local function clearTextTooltip()
     OTKUI.elems.tooltip.tooltipText.layout.props.text = ''
@@ -1564,6 +1597,7 @@ local function clearTextTooltip()
     OTKUI.elems.tooltip.hostWidget:update()
 end
 
+-- Shows the help-scroll button only when the selected subpage has tooltip text.
 ---@return nil
 updateSubPageHelpButtonVisibility = function()
     if not OTKUI.elems.subpageHelpButton or not OTKUI.elems.subpageHelpButton.layout then return end
@@ -2290,11 +2324,13 @@ local function onMouseWheel(vertical, horizontal)
     end
 end
 
+-- Rebuilds the menu after loading a save.
 ---@return nil
 local function onLoad()
     buildMenu()
 end
 
+-- Builds the menu when the script starts for the first time.
 ---@return nil
 local function onInit()
     buildMenu()

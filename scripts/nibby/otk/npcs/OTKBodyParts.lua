@@ -1,197 +1,487 @@
-local markup = require('openmw.markup')
-
-local RACE_FILE = 'scripts/nibby/otk/npcs/resources/races.yaml'
-
 ---@alias OTKGender 'female'|'male'
 ---@alias OTKNpcPartType 'hair'|'head'
 
----@class OTKBodyPartRecord
----@field race string
----@field gender? OTKGender
----@field isMale? boolean
----@field type OTKNpcPartType|string
----@field id string
+---@class OTKGenderPartRecords
+---@field heads string[] Head BODY record ids that fit this race and gender.
+---@field hairs string[] Hair BODY record ids that fit this race and gender.
 
----@type OTKBodyPartRecord[]
+---@class OTKRacePartRecords
+---@field female OTKGenderPartRecords
+---@field male OTKGenderPartRecords
+
+-- Vanilla playable head/hair BODY record ids. These are not mesh paths.
+---@type table<string, OTKRacePartRecords>
 local NPC_PART_RECORDS = {
-    -- Add head and hair IDs here as you discover them.
-    -- Example:
-    -- { race = 'Dark Elf', isMale = true, type = 'hair', id = 'b_n_dark elf_m_hair_01' },
-    -- { race = 'Dark Elf', isMale = true, type = 'head', id = 'b_n_dark elf_m_head_01' },
+    argonian = {
+        male = {
+            heads = {
+                'b_n_argonian_m_head_01',
+                'b_n_argonian_m_head_02',
+                'b_n_argonian_m_head_03',
+            },
+            hairs = {
+                'b_n_argonian_m_hair01',
+                'b_n_argonian_m_hair02',
+                'b_n_argonian_m_hair03',
+                'b_n_argonian_m_hair04',
+                'b_n_argonian_m_hair05',
+                'b_n_argonian_m_hair06',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_argonian_f_head_01',
+                'b_n_argonian_f_head_02',
+                'b_n_argonian_f_head_03',
+            },
+            hairs = {
+                'b_n_argonian_f_hair01',
+                'b_n_argonian_f_hair02',
+                'b_n_argonian_f_hair03',
+                'b_n_argonian_f_hair04',
+                'b_n_argonian_f_hair05',
+            },
+        },
+    },
+    breton = {
+        male = {
+            heads = {
+                'b_n_breton_m_head_01',
+                'b_n_breton_m_head_02',
+                'b_n_breton_m_head_03',
+                'b_n_breton_m_head_04',
+                'b_n_breton_m_head_05',
+                'b_n_breton_m_head_06',
+                'b_n_breton_m_head_07',
+                'b_n_breton_m_head_08',
+            },
+            hairs = {
+                'b_n_breton_m_hair_00',
+                'b_n_breton_m_hair_01',
+                'b_n_breton_m_hair_02',
+                'b_n_breton_m_hair_03',
+                'b_n_breton_m_hair_04',
+                'b_n_breton_m_hair_05',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_breton_f_head_01',
+                'b_n_breton_f_head_02',
+                'b_n_breton_f_head_03',
+                'b_n_breton_f_head_04',
+                'b_n_breton_f_head_05',
+                'b_n_breton_f_head_06',
+            },
+            hairs = {
+                'b_n_breton_f_hair_01',
+                'b_n_breton_f_hair_02',
+                'b_n_breton_f_hair_03',
+                'b_n_breton_f_hair_04',
+                'b_n_breton_f_hair_05',
+            },
+        },
+    },
+    dark_elf = {
+        male = {
+            heads = {
+                'b_n_dark elf_m_head_01',
+                'b_n_dark elf_m_head_02',
+                'b_n_dark elf_m_head_03',
+                'b_n_dark elf_m_head_04',
+                'b_n_dark elf_m_head_05',
+                'b_n_dark elf_m_head_06',
+                'b_n_dark elf_m_head_07',
+                'b_n_dark elf_m_head_08',
+                'b_n_dark elf_m_head_09',
+                'b_n_dark elf_m_head_10',
+                'b_n_dark elf_m_head_11',
+                'b_n_dark elf_m_head_12',
+                'b_n_dark elf_m_head_13',
+                'b_n_dark elf_m_head_14',
+                'b_n_dark elf_m_head_15',
+                'b_n_dark elf_m_head_16',
+                'b_n_dark elf_m_head_17',
+            },
+            hairs = {
+                'b_n_dark elf_m_hair_01',
+                'b_n_dark elf_m_hair_02',
+                'b_n_dark elf_m_hair_03',
+                'b_n_dark elf_m_hair_04',
+                'b_n_dark elf_m_hair_05',
+                'b_n_dark elf_m_hair_06',
+                'b_n_dark elf_m_hair_07',
+                'b_n_dark elf_m_hair_08',
+                'b_n_dark elf_m_hair_09',
+                'b_n_dark elf_m_hair_10',
+                'b_n_dark elf_m_hair_11',
+                'b_n_dark elf_m_hair_12',
+                'b_n_dark elf_m_hair_13',
+                'b_n_dark elf_m_hair_14',
+                'b_n_dark elf_m_hair_15',
+                'b_n_dark elf_m_hair_16',
+                'b_n_dark elf_m_hair_17',
+                'b_n_dark elf_m_hair_18',
+                'b_n_dark elf_m_hair_19',
+                'b_n_dark elf_m_hair_20',
+                'b_n_dark elf_m_hair_21',
+                'b_n_dark elf_m_hair_22',
+                'b_n_dark elf_m_hair_23',
+                'b_n_dark elf_m_hair_24',
+                'b_n_dark elf_m_hair_25',
+                'b_n_dark elf_m_hair_26',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_dark elf_f_head_01',
+                'b_n_dark elf_f_head_02',
+                'b_n_dark elf_f_head_03',
+                'b_n_dark elf_f_head_04',
+                'b_n_dark elf_f_head_05',
+                'b_n_dark elf_f_head_06',
+                'b_n_dark elf_f_head_07',
+                'b_n_dark elf_f_head_08',
+                'b_n_dark elf_f_head_09',
+                'b_n_dark elf_f_head_10',
+            },
+            hairs = {
+                'b_n_dark elf_f_hair_01',
+                'b_n_dark elf_f_hair_02',
+                'b_n_dark elf_f_hair_03',
+                'b_n_dark elf_f_hair_04',
+                'b_n_dark elf_f_hair_05',
+                'b_n_dark elf_f_hair_06',
+                'b_n_dark elf_f_hair_07',
+                'b_n_dark elf_f_hair_08',
+                'b_n_dark elf_f_hair_09',
+                'b_n_dark elf_f_hair_10',
+                'b_n_dark elf_f_hair_11',
+                'b_n_dark elf_f_hair_12',
+                'b_n_dark elf_f_hair_13',
+                'b_n_dark elf_f_hair_14',
+                'b_n_dark elf_f_hair_15',
+                'b_n_dark elf_f_hair_16',
+                'b_n_dark elf_f_hair_17',
+                'b_n_dark elf_f_hair_18',
+                'b_n_dark elf_f_hair_19',
+                'b_n_dark elf_f_hair_20',
+                'b_n_dark elf_f_hair_21',
+                'b_n_dark elf_f_hair_22',
+                'b_n_dark elf_f_hair_23',
+                'b_n_dark elf_f_hair_24',
+            },
+        },
+    },
+    high_elf = {
+        male = {
+            heads = {
+                'b_n_high elf_m_head_01',
+                'b_n_high elf_m_head_02',
+                'b_n_high elf_m_head_03',
+                'b_n_high elf_m_head_04',
+                'b_n_high elf_m_head_05',
+                'b_n_high elf_m_head_06',
+            },
+            hairs = {
+                'b_n_high elf_m_hair_01',
+                'b_n_high elf_m_hair_02',
+                'b_n_high elf_m_hair_03',
+                'b_n_high elf_m_hair_04',
+                'b_n_high elf_m_hair_05',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_high elf_f_head_01',
+                'b_n_high elf_f_head_02',
+                'b_n_high elf_f_head_03',
+                'b_n_high elf_f_head_04',
+                'b_n_high elf_f_head_05',
+                'b_n_high elf_f_head_06',
+            },
+            hairs = {
+                'b_n_high elf_f_hair_01',
+                'b_n_high elf_f_hair_02',
+                'b_n_high elf_f_hair_03',
+                'b_n_high elf_f_hair_04',
+            },
+        },
+    },
+    imperial = {
+        male = {
+            heads = {
+                'b_n_imperial_m_head_01',
+                'b_n_imperial_m_head_02',
+                'b_n_imperial_m_head_03',
+                'b_n_imperial_m_head_04',
+                'b_n_imperial_m_head_05',
+                'b_n_imperial_m_head_06',
+                'b_n_imperial_m_head_07',
+            },
+            hairs = {
+                'b_n_imperial_m_hair_00',
+                'b_n_imperial_m_hair_01',
+                'b_n_imperial_m_hair_02',
+                'b_n_imperial_m_hair_03',
+                'b_n_imperial_m_hair_04',
+                'b_n_imperial_m_hair_05',
+                'b_n_imperial_m_hair_06',
+                'b_n_imperial_m_hair_07',
+                'b_n_imperial_m_hair_08',
+                'b_n_imperial_m_hair_09',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_imperial_f_head_01',
+                'b_n_imperial_f_head_02',
+                'b_n_imperial_f_head_03',
+                'b_n_imperial_f_head_04',
+                'b_n_imperial_f_head_05',
+                'b_n_imperial_f_head_06',
+                'b_n_imperial_f_head_07',
+            },
+            hairs = {
+                'b_n_imperial_f_hair_01',
+                'b_n_imperial_f_hair_02',
+                'b_n_imperial_f_hair_03',
+                'b_n_imperial_f_hair_04',
+                'b_n_imperial_f_hair_05',
+                'b_n_imperial_f_hair_06',
+                'b_n_imperial_f_hair_07',
+            },
+        },
+    },
+    khajiit = {
+        male = {
+            heads = {
+                'b_n_khajiit_m_head_01',
+                'b_n_khajiit_m_head_02',
+                'b_n_khajiit_m_head_03',
+                'b_n_khajiit_m_head_04',
+            },
+            hairs = {
+                'b_n_khajiit_m_hair01',
+                'b_n_khajiit_m_hair02',
+                'b_n_khajiit_m_hair03',
+                'b_n_khajiit_m_hair04',
+                'b_n_khajiit_m_hair05',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_khajiit_f_head_01',
+                'b_n_khajiit_f_head_02',
+                'b_n_khajiit_f_head_03',
+                'b_n_khajiit_f_head_04',
+            },
+            hairs = {
+                'b_n_khajiit_f_hair01',
+                'b_n_khajiit_f_hair02',
+                'b_n_khajiit_f_hair03',
+                'b_n_khajiit_f_hair04',
+                'b_n_khajiit_f_hair05',
+            },
+        },
+    },
+    nord = {
+        male = {
+            heads = {
+                'b_n_nord_m_head_01',
+                'b_n_nord_m_head_02',
+                'b_n_nord_m_head_03',
+                'b_n_nord_m_head_04',
+                'b_n_nord_m_head_05',
+                'b_n_nord_m_head_06',
+                'b_n_nord_m_head_07',
+                'b_n_nord_m_head_08',
+                'b_n_nord_m_head_09',
+                'b_n_nord_m_head_10',
+                'b_n_nord_m_head_11',
+                'b_n_nord_m_head_12',
+                'b_n_nord_m_head_13',
+            },
+            hairs = {
+                'b_n_nord_m_hair00',
+                'b_n_nord_m_hair01',
+                'b_n_nord_m_hair02',
+                'b_n_nord_m_hair03',
+                'b_n_nord_m_hair04',
+                'b_n_nord_m_hair05',
+                'b_n_nord_m_hair06',
+                'b_n_nord_m_hair07',
+                'b_n_nord_m_hair08',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_nord_f_head_01',
+                'b_n_nord_f_head_02',
+                'b_n_nord_f_head_03',
+                'b_n_nord_f_head_04',
+                'b_n_nord_f_head_05',
+                'b_n_nord_f_head_06',
+                'b_n_nord_f_head_07',
+                'b_n_nord_f_head_08',
+                'b_n_nord_f_head_09',
+                'b_n_nord_f_head_10',
+                'b_n_nord_f_head_11',
+                'b_n_nord_f_head_12',
+                'b_n_nord_f_head_13',
+            },
+            hairs = {
+                'b_n_nord_f_hair_01',
+                'b_n_nord_f_hair_02',
+                'b_n_nord_f_hair_03',
+                'b_n_nord_f_hair_04',
+                'b_n_nord_f_hair_05',
+                'b_n_nord_f_hair_06',
+            },
+        },
+    },
+    orc = {
+        male = {
+            heads = {
+                'b_n_orc_m_head_01',
+                'b_n_orc_m_head_02',
+                'b_n_orc_m_head_03',
+                'b_n_orc_m_head_04',
+            },
+            hairs = {
+                'b_n_orc_m_hair_01',
+                'b_n_orc_m_hair_02',
+                'b_n_orc_m_hair_03',
+                'b_n_orc_m_hair_04',
+                'b_n_orc_m_hair_05',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_orc_f_head_01',
+                'b_n_orc_f_head_02',
+                'b_n_orc_f_head_03',
+            },
+            hairs = {
+                'b_n_orc_f_hair01',
+                'b_n_orc_f_hair02',
+                'b_n_orc_f_hair03',
+                'b_n_orc_f_hair04',
+                'b_n_orc_f_hair05',
+            },
+        },
+    },
+    redguard = {
+        male = {
+            heads = {
+                'b_n_redguard_m_head_01',
+                'b_n_redguard_m_head_02',
+                'b_n_redguard_m_head_03',
+                'b_n_redguard_m_head_04',
+                'b_n_redguard_m_head_05',
+                'b_n_redguard_m_head_06',
+            },
+            hairs = {
+                'b_n_redguard_m_hair_00',
+                'b_n_redguard_m_hair_01',
+                'b_n_redguard_m_hair_02',
+                'b_n_redguard_m_hair_03',
+                'b_n_redguard_m_hair_04',
+                'b_n_redguard_m_hair_05',
+                'b_n_redguard_m_hair_06',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_redguard_f_head_01',
+                'b_n_redguard_f_head_02',
+                'b_n_redguard_f_head_03',
+                'b_n_redguard_f_head_04',
+                'b_n_redguard_f_head_05',
+                'b_n_redguard_f_head_06',
+            },
+            hairs = {
+                'b_n_redguard_f_hair_01',
+                'b_n_redguard_f_hair_02',
+                'b_n_redguard_f_hair_03',
+                'b_n_redguard_f_hair_04',
+                'b_n_redguard_f_hair_05',
+            },
+        },
+    },
+    wood_elf = {
+        male = {
+            heads = {
+                'b_n_wood elf_m_head_01',
+                'b_n_wood elf_m_head_02',
+                'b_n_wood elf_m_head_03',
+                'b_n_wood elf_m_head_04',
+                'b_n_wood elf_m_head_05',
+                'b_n_wood elf_m_head_06',
+                'b_n_wood elf_m_head_07',
+                'b_n_wood elf_m_head_08',
+            },
+            hairs = {
+                'b_n_wood elf_m_hair_01',
+                'b_n_wood elf_m_hair_02',
+                'b_n_wood elf_m_hair_03',
+                'b_n_wood elf_m_hair_04',
+                'b_n_wood elf_m_hair_05',
+                'b_n_wood elf_m_hair_06',
+            },
+        },
+        female = {
+            heads = {
+                'b_n_wood elf_f_head_01',
+                'b_n_wood elf_f_head_02',
+                'b_n_wood elf_f_head_03',
+                'b_n_wood elf_f_head_04',
+                'b_n_wood elf_f_head_05',
+                'b_n_wood elf_f_head_06',
+            },
+            hairs = {
+                'b_n_wood elf_f_hair_01',
+                'b_n_wood elf_f_hair_02',
+                'b_n_wood elf_f_hair_03',
+                'b_n_wood elf_f_hair_04',
+                'b_n_wood elf_f_hair_05',
+            },
+        },
+    },
 }
 
----@class OTKGenderParts
----@field hair string[]
----@field head string[]
-
----@class OTKRaceParts
----@field female OTKGenderParts
----@field male OTKGenderParts
-
----@type table<string, OTKRaceParts>
-local bodyParts = {}
-local isBuilt = false
-
+-- Turns race names like "Dark Elf" into safe table keys like "dark_elf".
 ---@param value any
----@return string
+---@return string key
 local function normalizeKey(value)
-    return string.lower(tostring(value or '')):gsub('%s+', '_')
+    local key = string.lower(tostring(value or '')):gsub('%s+', '_')
+    return key
 end
 
+-- Picks one matching head or hair BODY record id.
 ---@param raceId string
----@return OTKRaceParts
-local function ensureRace(raceId)
-    local raceKey = normalizeKey(raceId)
-
-    if raceKey == '' then
-        raceKey = 'unknown'
-    end
-
-    if not bodyParts[raceKey] then
-        bodyParts[raceKey] = {
-            female = {
-                hair = {},
-                head = {},
-            },
-            male = {
-                hair = {},
-                head = {},
-            },
-        }
-    end
-
-    return bodyParts[raceKey]
-end
-
----@return nil
-local function clearBodyParts()
-    for key in pairs(bodyParts) do
-        bodyParts[key] = nil
-    end
-end
-
----@param filePath string
----@return table|nil yamlData Decoded YAML table, or nil on failure
-local function loadYaml(filePath)
-    local ok, yamlOrErr = pcall(markup.loadYaml, filePath)
-
-    if not ok then
-        print('[OTK - ERR] OTKBodyParts.loadYaml failed for ' .. tostring(filePath) .. ': ' .. tostring(yamlOrErr))
-        return nil
-    end
-
-    return yamlOrErr
-end
-
----@param genderOrIsMale OTKGender|boolean|nil
----@return OTKGender|nil
-local function normalizeGender(genderOrIsMale)
-    if genderOrIsMale == 'male' or genderOrIsMale == 'female' then
-        return genderOrIsMale
-    end
-
-    if genderOrIsMale ~= nil then
-        return genderOrIsMale and 'male' or 'female'
-    end
-
-    return nil
-end
-
----@param raceId string
----@param genderOrIsMale OTKGender|boolean|nil
----@param partType OTKNpcPartType|string
----@param recordId string
----@return boolean success
-local function registerNpcPart(raceId, genderOrIsMale, partType, recordId)
-    local gender = normalizeGender(genderOrIsMale)
-    local normalizedPartType = normalizeKey(partType)
-
-    if not gender or (normalizedPartType ~= 'hair' and normalizedPartType ~= 'head') then
-        return false
-    end
-
-    if type(recordId) ~= 'string' or recordId == '' then
-        return false
-    end
-
-    local raceParts = ensureRace(raceId)
-    table.insert(raceParts[gender][normalizedPartType], recordId)
-
-    return true
-end
-
----@return nil
-local function registerRaces()
-    local races = loadYaml(RACE_FILE)
-
-    if type(races) ~= 'table' or #races == 0 then
-        print('[OTK - ERR] OTKBodyParts.registerRaces found no races in ' .. RACE_FILE)
-        return
-    end
-
-    for _, raceId in ipairs(races) do
-        ensureRace(raceId)
-        print('[OTK] Race registered for NPC parts: ' .. tostring(raceId))
-    end
-end
-
----@return nil
-local function registerNpcPartRecords()
-    for _, record in ipairs(NPC_PART_RECORDS) do
-        registerNpcPart(record.race, record.gender or record.isMale, record.type, record.id)
-    end
-end
-
----@return nil
-local function buildParts()
-    clearBodyParts()
-    registerRaces()
-    registerNpcPartRecords()
-    isBuilt = true
-    print('[OTK] OTKBodyParts built NPC head/hair registry')
-end
-
----@param raceId string
----@param genderOrIsMale OTKGender|boolean|nil
----@param partType OTKNpcPartType|string
+---@param isMale boolean
+---@param partType OTKNpcPartType
 ---@return string|nil recordId
-local function selectNpcPart(raceId, genderOrIsMale, partType)
-    if not isBuilt then
-        print('[OTK - ERR] OTKBodyParts.selectNpcPart called before OTKBodyParts was initialized')
+local function selectNpcPart(raceId, isMale, partType)
+    local raceParts = NPC_PART_RECORDS[normalizeKey(raceId)]
+    local gender = isMale and 'male' or 'female'
+    local bucket = raceParts and raceParts[gender][partType .. 's']
+
+    if type(bucket) ~= 'table' or #bucket == 0 then
+        print('[OTK - ERR] OTKBodyParts.selectNpcPart found no ' .. tostring(partType)
+            .. ' for race=' .. tostring(raceId) .. ', gender=' .. gender)
         return nil
     end
 
-    local raceParts = bodyParts[normalizeKey(raceId)]
-    local gender = normalizeGender(genderOrIsMale)
-    local normalizedPartType = normalizeKey(partType)
-
-    if not raceParts or not gender then
-        return nil
-    end
-
-    local parts = raceParts[gender][normalizedPartType]
-
-    if type(parts) ~= 'table' or #parts == 0 then
-        return nil
-    end
-
-    return parts[math.random(1, #parts)]
-end
-
----@return nil
-local function OnInit()
-    buildParts()
+    return bucket[math.random(1, #bucket)]
 end
 
 return {
     interfaceName = 'OTKBodyParts',
     interface = {
         version = 1,
-        bodyParts = bodyParts,
-        registerNpcPart = registerNpcPart,
-        selectNpcPart = selectNpcPart
+        bodyParts = NPC_PART_RECORDS,
+        selectNpcPart = selectNpcPart,
     },
-    engineHandlers = {
-        onInit = OnInit
-    }
 }

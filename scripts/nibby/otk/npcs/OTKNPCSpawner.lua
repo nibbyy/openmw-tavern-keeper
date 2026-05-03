@@ -2,25 +2,27 @@ local types = require('openmw.types')
 local markup = require('openmw.markup')
 local interfaces = require('openmw.interfaces')
 
+-- Shape of the OTKBodyParts global interface this script asks for heads and hair.
 ---@class OTKBodyPartsInterface
----@field version integer
----@field bodyParts table
----@field registerNpcPart fun(raceId: string, genderOrIsMale: string|boolean|nil, partType: string, recordId: string): boolean
----@field selectNpcPart fun(raceId: string, genderOrIsMale: string|boolean|nil, partType: string): string|nil
+---@field version integer Interface version number
+---@field bodyParts table Shared registry of known body parts
+---@field selectNpcPart fun(raceId: string, isMale: boolean, partType: string): string|nil Picks a matching part id
 
+-- Data passed into OpenMW when creating a new NPC record draft.
 ---@class OTKNpcRecordData
----@field race string
----@field isMale boolean
----@field hair string
----@field head string
----@field class string
----@field isEssential boolean
----@field isRespawning boolean
----@field baseDisposition integer
----@field bloodType integer
----@field baseGold integer
+---@field race string Race id/name for the NPC
+---@field isMale boolean True for male, false for female
+---@field hair string Hair record id
+---@field head string Head record id
+---@field class string Class id/name for the NPC
+---@field isEssential boolean Whether the NPC is protected as essential
+---@field isRespawning boolean Whether the NPC can respawn
+---@field baseDisposition integer Starting friendliness
+---@field bloodType integer OpenMW blood type value
+---@field baseGold integer Starting gold
 
----@param filePath string
+-- Loads a YAML file safely so a bad resource file gives a useful log message.
+---@param filePath string Virtual OpenMW path to a YAML file
 ---@return table|nil yamlData Decoded YAML table, or nil on failure
 local function loadYaml(filePath)
     local ok, yamlOrErr = pcall(markup.loadYaml, filePath)
@@ -33,10 +35,16 @@ local function loadYaml(filePath)
     return yamlOrErr
 end
 
----@return string|nil raceId
-local function selectRace()
-    local races = loadYaml('scripts/nibby/otk/npcs/resources/races.yaml')
+local races
 
+local function registerRaces()
+    races = nil
+    races = loadYaml('scripts/nibby/otk/npcs/resources/races.yaml')
+end
+
+-- Picks one random race from the race list.
+---@return string|nil raceId Race name, or nil if the list could not be loaded
+local function selectRace()
     if type(races) ~= 'table' or #races == 0 then
         print('[OTK - ERR] OTKNPCSpawner.selectRace found no races to choose from')
         return nil
@@ -45,10 +53,16 @@ local function selectRace()
     return races[math.random(1, #races)]
 end
 
----@return string|nil classId
-local function selectClass()
-    local classes = loadYaml('scripts/nibby/otk/npcs/resources/classes.yaml')
+local classes
 
+local function registerClasses()
+    classes = nil
+    classes = loadYaml('scripts/nibby/otk/npcs/resources/classes.yaml')
+end
+
+-- Picks one random class from the class list.
+---@return string|nil classId Class name, or nil if the list could not be loaded
+local function selectClass()
     if type(classes) ~= 'table' or #classes == 0 then
         print('[OTK -ERR] OTKNPCSpawner.selectClass found no classes to choose from')
         return nil
@@ -57,16 +71,18 @@ local function selectClass()
     return classes[math.random(1, #classes)]
 end
 
+-- Flips a simple coin to decide the NPC's gender.
 ---@return boolean isMale
-local function selectIsMale()
+local function selectGender()
     return math.random(1, 2) == 1
 end
 
+-- Builds the NPC record data and asks OpenMW for a record draft.
 ---@return any|nil npcRecordDraft OpenMW NPC record draft, or nil if required data is missing
 local function buildNPC()
     print('Building an NPC...')
     local race = selectRace()
-    local isMale = selectIsMale()
+    local isMale = selectGender()
     local gender = isMale and 'male' or 'female'
     local class = selectClass()
     local bodyParts = interfaces.OTKBodyParts
@@ -115,6 +131,7 @@ local function buildNPC()
     local npcRecordData = {
         race = race,
         isMale = isMale,
+        gender = gender,
         hair = hair,
         head = head,
         class = class,
@@ -138,6 +155,7 @@ local function buildNPC()
     return npcRecordDraftOrErr
 end
 
+-- Event entry point: build an NPC when another script sends SpawnNPC.
 ---@return nil
 local function spawnNPC()
     local npcRecordDraft = buildNPC()
@@ -150,10 +168,16 @@ local function spawnNPC()
     print('NPC record draft prepared: ' .. tostring(npcRecordDraft.id))
 end
 
+local function OnLoad()
+    registerRaces()
+    registerClasses()
+end
+
 return {
     eventHandlers = {
         SpawnNPC = spawnNPC,
     },
     engineHandlers = {
+        onLoad = OnLoad,
     },
 }

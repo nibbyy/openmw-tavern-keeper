@@ -7,7 +7,7 @@ local util = require('openmw.util')
 local modLocale = core.l10n('nibbyotk', 'en')
 local errorText = modLocale('error_text', {})
 
--- Get colors from GMST, with locale settings
+-- Reads one UI color from Morrowind's game settings and turns it into an OpenMW color.
 ---@param colorTag string GMST id for an RGB color setting
 ---@return any|nil color util.color.rgb value, or nil if the GMST is missing
 local function getColorFromGameSettings(colorTag)
