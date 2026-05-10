@@ -6,6 +6,7 @@ PLAYER: scripts/nibby/otk/player/OTKCellChecker.lua
 
 CUSTOM: scripts/nibby/otk/custom/OTKLedger.lua
 
-GLOBAL: scripts/nibby/otk/global/OTKCustomAttacher.lua
+GLOBAL: scripts/nibby/otk/global/OTKTavernCore.lua
 GLOBAL: scripts/nibby/otk/npcs/OTKBodyParts.lua
+GLOBAL: scripts/nibby/otk/npcs/OTKNameGen.lua
 GLOBAL: scripts/nibby/otk/npcs/OTKNPCSpawner.lua

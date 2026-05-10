@@ -1,6 +1,7 @@
 local types = require('openmw.types')
-local markup = require('openmw.markup')
 local interfaces = require('openmw.interfaces')
+
+local builder = require('scripts.nibby.otk.building.OTKBuilder')
 
 -- Shape of the OTKBodyParts global interface this script asks for heads and hair.
 ---@class OTKBodyPartsInterface
@@ -8,8 +9,15 @@ local interfaces = require('openmw.interfaces')
 ---@field bodyParts table Shared registry of known body parts
 ---@field selectNpcPart fun(raceId: string, isMale: boolean, partType: string): string|nil Picks a matching part id
 
+-- Shape of the OTKNameGen global interface this script asks for NPC names.
+---@class OTKNameGenInterface
+---@field version integer Interface version number
+---@field nameList table Shared registry of known names
+---@field selectName fun(race: string, isMale: boolean): string|nil Picks a matching NPC name
+
 -- Data passed into OpenMW when creating a new NPC record draft.
 ---@class OTKNpcRecordData
+---@field name string Generated display name for the NPC
 ---@field race string Race id/name for the NPC
 ---@field isMale boolean True for male, false for female
 ---@field hair string Hair record id
@@ -21,25 +29,11 @@ local interfaces = require('openmw.interfaces')
 ---@field bloodType integer OpenMW blood type value
 ---@field baseGold integer Starting gold
 
--- Loads a YAML file safely so a bad resource file gives a useful log message.
----@param filePath string Virtual OpenMW path to a YAML file
----@return table|nil yamlData Decoded YAML table, or nil on failure
-local function loadYaml(filePath)
-    local ok, yamlOrErr = pcall(markup.loadYaml, filePath)
-
-    if not ok then
-        print('[OTK - ERR] OTKNPCSpawner.loadYaml failed for ' .. tostring(filePath) .. ': ' .. tostring(yamlOrErr))
-        return nil
-    end
-
-    return yamlOrErr
-end
-
 local races
 
 local function registerRaces()
     races = nil
-    races = loadYaml('scripts/nibby/otk/npcs/resources/races.yaml')
+    races = builder.loadYaml('scripts/nibby/otk/npcs/resources/races.yaml')
 end
 
 -- Picks one random race from the race list.
@@ -57,7 +51,7 @@ local classes
 
 local function registerClasses()
     classes = nil
-    classes = loadYaml('scripts/nibby/otk/npcs/resources/classes.yaml')
+    classes = builder.loadYaml('scripts/nibby/otk/npcs/resources/classes.yaml')
 end
 
 -- Picks one random class from the class list.
@@ -86,6 +80,7 @@ local function buildNPC()
     local gender = isMale and 'male' or 'female'
     local class = selectClass()
     local bodyParts = interfaces.OTKBodyParts
+    local nameGen = interfaces.OTKNameGen
 
     if not race then
         print('[OTK - ERR] OTKNPCSpawner.buildNPC cannot create NPC draft without a race')
@@ -102,15 +97,28 @@ local function buildNPC()
         return nil
     end
 
+    if not nameGen then
+        print('[OTK - ERR] OTKNPCSpawner.buildNPC could not find OTKNameGen interface')
+        return nil
+    end
+
     if type(bodyParts.selectNpcPart) ~= 'function' then
         print('[OTK - ERR] OTKNPCSpawner.buildNPC OTKBodyParts interface is missing selectNpcPart')
         return nil
     end
 
+    if type(nameGen.selectName) ~= 'function' then
+        print('[OTK - ERR] OTKNPCSpawner.buildNPC OTKNameGen interface is missing selectName')
+        return nil
+    end
+
     ---@cast bodyParts OTKBodyPartsInterface
+    ---@cast nameGen OTKNameGenInterface
     local hair = bodyParts.selectNpcPart(race, isMale, 'hair')
     local head = bodyParts.selectNpcPart(race, isMale, 'head')
+    local name = nameGen.selectName(race, isMale)
 
+    print("Name selected: " .. tostring(name))
     print("Race selected: " .. tostring(race))
     print("Gender selected: " .. gender)
     print("Class selected: " .. tostring(class))
@@ -127,8 +135,14 @@ local function buildNPC()
         return nil
     end
 
+    if not name then
+        print('[OTK - ERR] OTKNPCSpawner.buildNPC found no name for race=' .. tostring(race) .. ', gender=' .. gender)
+        return nil
+    end
+
     ---@type OTKNpcRecordData
     local npcRecordData = {
+        name = name,
         race = race,
         isMale = isMale,
         gender = gender,

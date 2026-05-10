@@ -1,6 +1,4 @@
 ---@class OTKChecks
----@field tavernEntered boolean
----@field ledgerPlaced boolean
 
 ---@class OTKVariables
 ---@field checks OTKChecks
@@ -9,8 +7,6 @@
 ---@type OTKVariables
 local variables = {
     checks = {
-        tavernEntered = false,
-        ledgerPlaced = false,
     },
     unlocks = {},
 }

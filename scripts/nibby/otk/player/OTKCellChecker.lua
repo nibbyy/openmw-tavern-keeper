@@ -1,25 +1,20 @@
-local core = require('openmw.core')
 local self = require('openmw.self')
+local core = require('openmw.core')
 
-local variables = require('scripts.nibby.otk.OTKVariables')
-
--- Checks whether the player is in the tavern, then tells the global script if setup should run.
+---Notifies the global tavern script when the player is inside the tavern cell.
 ---@return nil
-local function checkCell()
-    local cell = self.cell.name
+local function checkCurrentCell()
+    local cell = self.cell
+    if not cell then return end
 
-    if cell == "Your Tavern" then
-        print("Tavern entered!")
-        variables.checks.tavernEntered = true
-        core.sendGlobalEvent('TavernEntered')
-    else
-        variables.checks.tavernEntered = false
+    if cell.name == 'Your Tavern' then
+        -- Events can only carry plain values, so send the name instead of the cell object
+        core.sendGlobalEvent('TavernEntered', { cellName = cell.name })
     end
 end
 
 return {
     engineHandlers = {
-        onLoad = checkCell,
-        onTeleported = checkCell,
+        onTeleported = checkCurrentCell,
     }
 }

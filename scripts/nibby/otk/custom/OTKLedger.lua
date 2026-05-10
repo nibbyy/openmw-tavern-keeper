@@ -1,11 +1,14 @@
 local core = require('openmw.core')
+local self = require('openmw.self')
 
--- Called when the player activates the ledger object in the tavern.
+---Tells the global tavern core which specific ledger instance was activated.
 ---@param actor any Actor that activated the ledger
 ---@return nil
 local function onActivated(actor)
-    print('Ledger Activated!')
-    core.sendGlobalEvent('SpawnNPC')
+    core.sendGlobalEvent('SwapLedger', {
+        recordId = self.object.recordId,
+        ledger = self.object,
+    })
 end
 
 return {

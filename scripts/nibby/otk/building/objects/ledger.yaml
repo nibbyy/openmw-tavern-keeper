@@ -1,12 +1,9 @@
 ---
- id: "otk_ledger_open"
- cell: "Your Tavern"
- script: "scripts/nibby/otk/custom/OTKLedger.lua"
- posX: -214.000
- posY: 712.000
- posZ: 148.000
- rotX: -45.000000
- rotY: -22.000002
- rotZ: -21.000000
- scale: 0.500
+ posX: -214
+ posY: 712
+ posZ: 148
+ rotX: -45
+ rotY: -22
+ rotZ: -21
+ scale: 0.5
 ...

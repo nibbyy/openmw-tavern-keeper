@@ -11,7 +11,6 @@ local util = require('openmw.util')
 local interfaces = require('openmw.interfaces')
 local self = require('openmw.self')
 local markup = require('openmw.markup')
-local constants = require('scripts.omw.mwui.constants')
 local vfs = require('openmw.vfs')
 
 local modLocale = core.l10n('nibbyotk', 'en')
@@ -19,8 +18,9 @@ local v2 = util.vector2
 local MWUI = interfaces.MWUI
 
 -- Require our helper scripts
-local colorGetter = require('scripts.nibby.otk.menu.modules.OTKColorGetter')
 local splashList = require('scripts.nibby.otk.menu.modules.OTKSubtitleSplashes')
+local colorHandler = require('scripts.nibby.otk.menu.modules.OTKColorHandler')
+local tooltipHandler = require('scripts.nibby.otk.menu.modules.OTKTooltipHandler')
 
 -- UI Variable storage; these are generally called early to be checked or used by other functions
 local OTKUI = {
@@ -31,8 +31,6 @@ local OTKUI = {
         PAGE_BUTTON_TEXT_SIZE = 18,
         SUBPAGE_BUTTON_TEXT_SIZE = 14,
         SUBPAGE_CONTENT_TEXT_SIZE = 12,
-        TOOLTIP_TEXT_SIZE = 14,
-        TOOLTIP_MAX_CHARS_PER_LINE = 36,
         VERTICAL_SCROLLBAR_THICKNESS = 8,
         HORIZONTAL_SCROLLBAR_THICKNESS = 8,
         VERTICAL_THUMB_SIZE = v2(8, 64),
@@ -53,23 +51,13 @@ local OTKUI = {
         subpageHelpButton = nil,
         previousHistoryButton = nil,
         forwardHistoryButton = nil,
-        tooltip = {
-            hostWidget = nil,
-            currentTooltip = nil,
-            tooltipText = nil,
-        },
     },
     pages = {
         pageFilePath = 'scripts/nibby/otk/menu/pages/',
         list = {},
         count = 0,
     },
-    art = {
-        morrowindGold = util.color.rgb(0.792157, 0.647059, 0.376471),
-        morrowindLight = util.color.rgb(0.87451, 0.788235, 0.623529),
-        colorBlack = util.color.rgb(0, 0, 0),
-        whiteTexture = constants.whiteTexture,
-    },
+    art = colorHandler.art,
     history = {
         previousHistory = {},
         forwardHistory = {},
@@ -78,6 +66,22 @@ local OTKUI = {
 
 ---@type table<string, fun(dt?: number)>
 local onFrameFunctions = {} -- Used for button functions to call onFrame
+
+---@class CurrentScrollElem
+---@field flexElem any -- UI element that moves when scrolled
+---@field hostElem any -- UI element that clips the moving flex
+---@field contentSize number -- Total scrollable size of the moving flex
+
+---@type CurrentScrollElem|nil
+local currentScrollElem = nil
+
+-- Gets a cached darker version of one shared art color.
+---@param artKey string Key in colorHandler.art
+---@param multiplier number Amount to multiply the RGB values by
+---@return any|nil color util.color.rgb value
+local function getDarkenedArtColor(artKey, multiplier)
+    return colorHandler.darkenColor(artKey, OTKUI.art[artKey], multiplier)
+end
 
 -- Helper function for checking if the Root element is visible
 ---@return boolean -- True if the menu is open
@@ -111,12 +115,18 @@ local function getTexture(path)
     return textureCache[path] -- Return the cached texture
 end
 
--- Helper function to darken RGB colors
----@param color table -- util.color.rgb table
----@param multiplier number -- Amount to multiply the RGB by
----@return any util.color.rgb -- Returned util.color.rgb()
-local function darkenColor(color, multiplier)
-    return util.color.rgb(color.r * multiplier, color.g * multiplier, color.b * multiplier)
+-- Clears queued menu UI callbacks so they cannot run after the menu is hidden.
+---@return nil
+local function clearOnFrameFunctions()
+    for key in pairs(onFrameFunctions) do
+        onFrameFunctions[key] = nil
+    end
+end
+
+-- Clears the active mouse wheel target when the menu or page state changes.
+---@return nil
+local function clearCurrentScrollTarget()
+    currentScrollElem = nil
 end
 
 -- Function called to close the menu
@@ -135,10 +145,9 @@ local function closeMenu()
         OTKUI.elems.subpageHelpButton:update()
     end
 
-    if OTKUI.elems.tooltip.hostWidget and OTKUI.elems.tooltip.hostWidget.layout then
-        OTKUI.elems.tooltip.hostWidget.layout.props.visible = false
-        OTKUI.elems.tooltip.hostWidget:update()
-    end
+    tooltipHandler.clear()
+    clearCurrentScrollTarget()
+    clearOnFrameFunctions()
 end
 
 -- Called by other scripts to add functions to onFrameFunctions
@@ -237,8 +246,12 @@ end
 ---@field index integer Display order in the page list
 ---@field subPages TavernSubPage[] -- Ordered subpage records
 ---@field lastSubPage TavernSubPage|nil -- Most recently viewed subpage on this page
+---@field subPageButtonWidth number|nil -- Pixel width used for each subpage tab
+---@field subPageListHostWidget any|nil -- UI element that clips this page's subpage button row
 ---@field buttonBackground any|nil -- Page button background image
 ---@field subPageListFlex any|nil -- UI element for this page's subpage button row
+---@field subPageScrollBarHost any|nil -- UI element that holds this page's horizontal subpage scrollbar
+---@field hasSubPageScrollBar boolean|nil -- True when this page's subpage row needs a scrollbar
 
 -- One smaller tab inside a main tavern menu page.
 ---@class TavernSubPage
@@ -247,7 +260,7 @@ end
 ---@field content string|nil Body text for text subpages
 ---@field tooltip string|nil Optional help text shown from the scroll icon
 ---@field buttonBackground any|nil -- Subpage button background image
----@field contentWidget any|nil -- Subpage content UI element
+---@field contentHost any|nil -- UI element that hosts this subpage's content pane
 
 -- Normalizes page data loaded from YAML into the same shape the UI expects
 ---@param fileName string YAML file name, used in error messages
@@ -389,14 +402,14 @@ end
 ---@field thickness integer
 ---@field thumbLength integer
 ---@field reserveSpace boolean
+---@field lastTrackSize any|nil -- Last applied scrollbar track size
+---@field lastThumbSize any|nil -- Last applied thumb size
+---@field lastIsHorizontal boolean|nil -- Last scrollbar direction we laid out
+---@field reservedSpaceApplied boolean|nil -- True after the host has made room for the scrollbar
 
 ---@type table<any, ScrollBarData>
 local scrollBars = {}
 
--- Mouse wheel scrolling variables
-local scrollableWindow = nil -- Our flex element which 'moves' when scrolled
-local hostElem = nil -- Declares the 'host' element of the flex element
-local scrollContentSize = nil
 local addScrollBar = nil
 local updateScrollBar = nil
 
@@ -473,23 +486,30 @@ local function getScrollMetrics(flexElem, containerElem, contentSize)
     }
 end
 
+---@param a any|nil First vector to compare
+---@param b any|nil Second vector to compare
+---@return boolean
+local function areVectorsEqual(a, b)
+    return a ~= nil and b ~= nil and a.x == b.x and a.y == b.y
+end
+
 -- Helper Function to assign a UI target for mouse wheel scrolling
 ---@param flexElem any -- UI element
 ---@param containerElem any -- UI element
 ---@param contentSize number
 local function setScrollTarget(flexElem, containerElem, contentSize)
-    scrollableWindow = flexElem
-    hostElem = containerElem
-    scrollContentSize = contentSize
+    currentScrollElem = {
+        flexElem = flexElem,
+        hostElem = containerElem,
+        contentSize = contentSize,
+    }
 end
 
 -- Helper Function to clear our mouse wheel targets
 ---@param flexElem any -- UI element
 local function clearScrollTarget(flexElem)
-    if scrollableWindow == flexElem then
-        scrollableWindow = nil
-        hostElem = nil
-        scrollContentSize = nil
+    if currentScrollElem and currentScrollElem.flexElem == flexElem then
+        clearCurrentScrollTarget()
     end
 end
 
@@ -500,7 +520,7 @@ local function updateSubPageButtonVisual(subPage)
 
     if OTKUI.elems.currentSubPage == subPage then
         subPage.buttonBackground.layout.props.alpha = 0.45
-        subPage.buttonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.5)
+        subPage.buttonBackground.layout.props.color = getDarkenedArtColor('morrowindGold', 0.5)
     else
         subPage.buttonBackground.layout.props.alpha = 0.2
         subPage.buttonBackground.layout.props.color = OTKUI.art.colorBlack
@@ -516,7 +536,7 @@ local function updatePageButtonVisual(page)
 
     if OTKUI.elems.currentPage == page then
         page.buttonBackground.layout.props.alpha = 0.7
-        page.buttonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.7)
+        page.buttonBackground.layout.props.color = getDarkenedArtColor('morrowindGold', 0.7)
     else
         page.buttonBackground.layout.props.alpha = 0.4
         page.buttonBackground.layout.props.color = OTKUI.art.colorBlack
@@ -978,19 +998,18 @@ local function buildSubPageButton(page, subPage, subpageListWidget)
     clickBox.layout.events = {
         focusGain = async:callback(function ()
             onFrameFunctions[page.name..'_'..subPage.name..'_subPageFocusGain'] = function ()
-                if scrollableWindow == nil and page.subPageListHostWidget then
+                if page.subPageListHostWidget then
                     setScrollTarget(page.subPageListFlex, page.subPageListHostWidget, getSubPageListSize(page))
                 end
                 if OTKUI.elems.currentSubPage ~= subPage then
                     subpageButtonBackground.layout.props.alpha = 0.35
-                    subpageButtonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.35)
+                    subpageButtonBackground.layout.props.color = getDarkenedArtColor('morrowindGold', 0.35)
                     subpageButtonBackground:update()
                 end
             end
         end),
         focusLoss = async:callback(function ()
             onFrameFunctions[page.name..'_'..subPage.name..'_subPageFocusLoss'] = function ()
-                clearScrollTarget(page.subPageListFlex)
                 updateSubPageButtonVisual(subPage)
             end
         end),
@@ -998,7 +1017,7 @@ local function buildSubPageButton(page, subPage, subpageListWidget)
             if event.button == 1 then
                 onFrameFunctions[page.name..'_'..subPage.name..'_subPageMousePress'] = function ()
                     subpageButtonBackground.layout.props.alpha = 0.7
-                    subpageButtonBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.7)
+                    subpageButtonBackground.layout.props.color = getDarkenedArtColor('morrowindGold', 0.7)
                     subpageButtonBackground:update()
                 end
             end
@@ -1045,15 +1064,8 @@ local function buildSubPages(page, subpageListWidget, subpageListHostWidget, sub
 
     subpageListFlex.layout.events = {
         focusGain = async:callback(function ()
-            if scrollableWindow == nil then
-                onFrameFunctions[page.name..'_subPageListFocusGain'] = function ()
-                    setScrollTarget(subpageListFlex, subpageListHostWidget, getSubPageListSize(page))
-                end
-            end
-        end),
-        focusLoss = async:callback(function ()
-            onFrameFunctions[page.name..'_subPageListFocusLoss'] = function ()
-                clearScrollTarget(subpageListFlex)
+            onFrameFunctions[page.name..'_subPageListFocusGain'] = function ()
+                setScrollTarget(subpageListFlex, subpageListHostWidget, getSubPageListSize(page))
             end
         end),
     }
@@ -1153,7 +1165,7 @@ local function buildPageList(pageFlex, pageListHost)
                 props = {
                     text = page.label,
                     textSize = OTKUI.constants.PAGE_BUTTON_TEXT_SIZE,
-                    textColor = colorGetter.normal,
+                    textColor = colorHandler.normal,
                     textShadow = true,
                     textShadowColor = OTKUI.art.colorBlack,
                     anchor = v2(0.5, 0.5),
@@ -1186,12 +1198,10 @@ local function buildPageList(pageFlex, pageListHost)
                 focusGain = async:callback(function ()
                     clickBox.layout.userData.focused = true
                     onFrameFunctions[page.name..'_focusGain'] = function ()
-                        if scrollableWindow == nil then
-                            setScrollTarget(pageFlex, pageListHost, getPageListSize())
-                        end
+                        setScrollTarget(pageFlex, pageListHost, getPageListSize())
                         if OTKUI.elems.currentPage ~= page and not clickBox.layout.userData.pressed then
                             pageBackground.layout.props.alpha = 0.6
-                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.4)
+                            pageBackground.layout.props.color = getDarkenedArtColor('morrowindGold', 0.4)
                             pageBackground:update()
                         end
                     end
@@ -1200,9 +1210,6 @@ local function buildPageList(pageFlex, pageListHost)
                     clickBox.layout.userData.focused = false
                     clickBox.layout.userData.pressed = false
                     onFrameFunctions[page.name..'_focusLoss'] = function ()
-                        if scrollableWindow ~= nil then
-                            clearScrollTarget(pageFlex)
-                        end
                         updatePageButtonVisual(page)
                     end
                 end),
@@ -1212,7 +1219,7 @@ local function buildPageList(pageFlex, pageListHost)
                         clickBox.layout.userData.pressed = true
                         onFrameFunctions[page.name..'_mousePress'] = function ()
                             pageBackground.layout.props.alpha = 0.9
-                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.9)
+                            pageBackground.layout.props.color = getDarkenedArtColor('morrowindGold', 0.9)
                             pageBackground:update()
                         end
                     end
@@ -1233,7 +1240,7 @@ local function buildPageList(pageFlex, pageListHost)
                             updatePageButtonVisual(page)
                         elseif clickBox.layout.userData.focused and OTKUI.elems.currentPage ~= page then
                             pageBackground.layout.props.alpha = 0.6
-                            pageBackground.layout.props.color = darkenColor(OTKUI.art.morrowindGold, 0.4)
+                            pageBackground.layout.props.color = getDarkenedArtColor('morrowindGold', 0.4)
                             pageBackground:update()
                         else
                             updatePageButtonVisual(page)
@@ -1263,18 +1270,25 @@ local function reserveScrollBarSpace(flexHost, thickness, isHorizontal)
     local hostSize = flexHost.layout.props.size
     if not hostSize then
         print('[OTK - ERR] OTKTavernMenu.reserveScrollBarSpace: flexHost has no size: ' .. tostring(flexHost))
+        return false
     end
 
     -- Keep the original size so repeated calls do not keep subtracting thickness
     local baseSize = scrollHostSizes[flexHost] or hostSize
     scrollHostSizes[flexHost] = baseSize
 
+    local targetSize
     if isHorizontal then
-        flexHost.layout.props.size = v2(baseSize.x, math.max(0, baseSize.y - thickness))
+        targetSize = v2(baseSize.x, math.max(0, baseSize.y - thickness))
     else
-        flexHost.layout.props.size = v2(math.max(0, baseSize.x - thickness), baseSize.y)
+        targetSize = v2(math.max(0, baseSize.x - thickness), baseSize.y)
     end
 
+    if areVectorsEqual(hostSize, targetSize) then
+        return true
+    end
+
+    flexHost.layout.props.size = targetSize
     flexHost:update()
     return true
 end
@@ -1302,10 +1316,11 @@ addScrollBar = function (scrollBarHost, flexElem, flexHost, contentSize, options
 
     local namePrefix = options.namePrefix or (flexElem.layout.name or 'scroll')
     local reserveSpace = options.reserveSpace ~= false
+    local reservedSpaceApplied = false
 
     -- Reserve space if a scrollbar is needed
     if reserveSpace then
-        reserveScrollBarSpace(flexHost, thickness, scrollMetrics.isHorizontal)
+        reservedSpaceApplied = reserveScrollBarSpace(flexHost, thickness, scrollMetrics.isHorizontal)
     end
 
     -- Recalculate after shrinking the host, since hostSize has changed
@@ -1387,24 +1402,32 @@ addScrollBar = function (scrollBarHost, flexElem, flexHost, contentSize, options
         thickness = thickness,
         thumbLength = thumbLength,
         reserveSpace = reserveSpace,
+        lastTrackSize = trackSize,
+        lastThumbSize = thumbSize,
+        lastIsHorizontal = scrollMetrics.isHorizontal,
+        reservedSpaceApplied = reservedSpaceApplied,
     }
 
     return scrollBarWidget
 end
 
--- Function called to update the scroll bar of a given UI element
+-- Refreshes scrollbar pieces that only need to change when the layout changes.
 ---@param flexElem any -- UI element
-updateScrollBar = function (flexElem)
+---@return ScrollMetrics|nil scrollMetrics Metrics after any host resizing
+local function refreshScrollBarLayout(flexElem)
     local scrollBarData = scrollBars[flexElem]
-    if not scrollBarData then return end
+    if not scrollBarData then return nil end
 
     local isHorizontal = flexElem.layout.props.horizontal == true
-    if scrollBarData.reserveSpace then
-        reserveScrollBarSpace(scrollBarData.hostElem, scrollBarData.thickness, isHorizontal)
+    if scrollBarData.reserveSpace and (
+        not scrollBarData.reservedSpaceApplied
+        or scrollBarData.lastIsHorizontal ~= isHorizontal
+    ) then
+        scrollBarData.reservedSpaceApplied = reserveScrollBarSpace(scrollBarData.hostElem, scrollBarData.thickness, isHorizontal)
     end
 
     local scrollMetrics = getScrollMetrics(flexElem, scrollBarData.hostElem, scrollBarData.contentSize)
-    if not scrollMetrics or not scrollMetrics.canScroll then return end
+    if not scrollMetrics or not scrollMetrics.canScroll then return nil end
 
     local trackSize
     if scrollMetrics.isHorizontal then
@@ -1413,12 +1436,70 @@ updateScrollBar = function (flexElem)
         trackSize = v2(scrollBarData.thickness, scrollMetrics.hostSize)
     end
 
-    scrollBarData.scrollBarHost.layout.props.size = trackSize
-    scrollBarData.track.layout.props.size = trackSize
+    if not areVectorsEqual(scrollBarData.lastTrackSize, trackSize) then
+        scrollBarData.scrollBarHost.layout.props.size = trackSize
+        scrollBarData.track.layout.props.size = trackSize
+        scrollBarData.lastTrackSize = trackSize
+
+        scrollBarData.scrollBarHost:update()
+        scrollBarData.track:update()
+    end
 
     -- Recalculate thumb size in case the host or content size changed
     -- Thumb gets smaller as total content gets larger
     local thumbLength = math.min(scrollBarData.thumbLength, scrollMetrics.hostSize)
+    local thumbSize
+
+    if scrollMetrics.isHorizontal then
+        thumbSize = v2(thumbLength, OTKUI.constants.HORIZONTAL_THUMB_SIZE.y)
+    else
+        thumbSize = v2(scrollBarData.thickness, thumbLength)
+    end
+
+    if not areVectorsEqual(scrollBarData.lastThumbSize, thumbSize) then
+        scrollBarData.thumb.layout.props.size = thumbSize
+        scrollBarData.lastThumbSize = thumbSize
+        scrollBarData.thumb:update()
+    end
+
+    if scrollBarData.lastIsHorizontal ~= scrollMetrics.isHorizontal then
+        scrollBarData.thumb.layout.props.resource = getThumbTexture(scrollMetrics.isHorizontal)
+        scrollBarData.lastIsHorizontal = scrollMetrics.isHorizontal
+        scrollBarData.thumb:update()
+    end
+
+    if scrollBarData.thumbTop and scrollBarData.thumbBottom then
+        scrollBarData.thumbTop.layout.props.visible = true -- Only add the caps if its a vertical scroll bar
+        scrollBarData.thumbBottom.layout.props.visible = true
+
+        scrollBarData.thumbTop.layout.props.size = v2(scrollBarData.thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT) -- Set their size
+        scrollBarData.thumbBottom.layout.props.size = v2(scrollBarData.thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT)
+
+        scrollBarData.thumbTop:update()
+        scrollBarData.thumbBottom:update()
+    end
+
+    return scrollMetrics
+end
+
+-- Moves only the scrollbar thumb. This is the cheap path used by mouse wheel scrolling.
+---@param flexElem any -- UI element
+local function updateScrollBarThumb(flexElem)
+    local scrollBarData = scrollBars[flexElem]
+    if not scrollBarData then return end
+
+    local scrollMetrics = getScrollMetrics(flexElem, scrollBarData.hostElem, scrollBarData.contentSize)
+    if not scrollMetrics or not scrollMetrics.canScroll then return end
+
+    local thumbSize = scrollBarData.lastThumbSize or scrollBarData.thumb.layout.props.size
+    if not thumbSize then return end
+
+    local thumbLength
+    if scrollMetrics.isHorizontal then
+        thumbLength = thumbSize.x
+    else
+        thumbLength = thumbSize.y
+    end
 
     -- travelRange is how far the thumb body can move inside the track
     local travelRange = math.max(0, scrollMetrics.hostSize - thumbLength)
@@ -1434,42 +1515,45 @@ updateScrollBar = function (flexElem)
 
     -- Convert scroll progress from 0.0-1.0 fraction into a pixel offset
     local thumbPos = math.floor(travelRange * scrollFraction)
+    local thumbPosition
 
     if scrollMetrics.isHorizontal then
-        scrollBarData.thumb.layout.props.size = v2(thumbLength, OTKUI.constants.HORIZONTAL_THUMB_SIZE.y)
-        scrollBarData.thumb.layout.props.position = v2(thumbPos, 0)
+        thumbPosition = v2(thumbPos, 0)
     else
-        scrollBarData.thumb.layout.props.size = v2(scrollBarData.thickness, thumbLength)
         -- Offset the body by the top cap height so the full visual thumb, including both caps, stays inside the track
-        scrollBarData.thumb.layout.props.position = v2(0, thumbPos)
+        thumbPosition = v2(0, thumbPos)
     end
 
-    scrollBarData.thumb.layout.props.resource = getThumbTexture(scrollMetrics.isHorizontal)
-
-    if scrollBarData.thumbTop and scrollBarData.thumbBottom then
-        scrollBarData.thumbTop.layout.props.visible = true -- Only add the caps if its a vertical scroll bar
-        scrollBarData.thumbBottom.layout.props.visible = true
-
-        scrollBarData.thumbTop.layout.props.size = v2(scrollBarData.thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT) -- Set their size
-        scrollBarData.thumbBottom.layout.props.size = v2(scrollBarData.thickness, OTKUI.constants.VERTICAL_THUMB_CAP_HEIGHT)
-
-        scrollBarData.thumbTop:update()
-        scrollBarData.thumbBottom:update()
+    if areVectorsEqual(scrollBarData.thumb.layout.props.position, thumbPosition) then
+        return
     end
 
-    scrollBarData.scrollBarHost:update()
+    scrollBarData.thumb.layout.props.position = thumbPosition
     scrollBarData.thumb:update()
-    scrollBarData.track:update()
+end
+
+-- Function called to update the scroll bar of a given UI element.
+---@param flexElem any -- UI element
+updateScrollBar = function (flexElem)
+    if refreshScrollBarLayout(flexElem) then
+        updateScrollBarThumb(flexElem)
+    end
 end
 
 -- Function called for mouse wheel behavior in the page list
 ---@param direction number
 local function scrollElem(direction)
-    if not scrollableWindow or not scrollableWindow.layout then return end -- scrollableWindow can become nil between frames
-    if not hostElem or not hostElem.layout then return end
-    if not scrollContentSize then return end
+    if not currentScrollElem then return end
 
-    local scrollMetrics = getScrollMetrics(scrollableWindow, hostElem, scrollContentSize)
+    local flexElem = currentScrollElem.flexElem
+    local scrollHostElem = currentScrollElem.hostElem
+    local contentSize = currentScrollElem.contentSize
+
+    if not flexElem or not flexElem.layout then return end
+    if not scrollHostElem or not scrollHostElem.layout then return end
+    if not contentSize then return end
+
+    local scrollMetrics = getScrollMetrics(flexElem, scrollHostElem, contentSize)
     if not scrollMetrics then
         print('[OTK - ERR] OTKTavernMenu.scrollElem: Failed to get scroll metrics!')
         return
@@ -1483,13 +1567,13 @@ local function scrollElem(direction)
     local newPos = math.max(scrollMetrics.minPos, math.min(0, scrollMetrics.currentPos + direction))
 
     if scrollMetrics.isHorizontal then
-        scrollableWindow.layout.props.position = v2(newPos, scrollMetrics.flexPos.y)
+        flexElem.layout.props.position = v2(newPos, scrollMetrics.flexPos.y)
     else
-        scrollableWindow.layout.props.position = v2(scrollMetrics.flexPos.x, newPos)
+        flexElem.layout.props.position = v2(scrollMetrics.flexPos.x, newPos)
     end
 
-    scrollableWindow:update()
-    updateScrollBar(scrollableWindow)
+    flexElem:update()
+    updateScrollBarThumb(flexElem)
 end
 
 -- Function used for exit button mouse logic
@@ -1504,99 +1588,6 @@ local function exitButtonLogic(elem, texturePath, shouldClose)
     end
 end
 
--- Creates the text element that lives inside the tooltip box.
----@return nil
-local function registerTextTooltip()
-    OTKUI.elems.tooltip.tooltipText = ui.create {
-        name = 'textTooltipText',
-        type = ui.TYPE.Text,
-        props = {
-            text = '',
-            textColor = OTKUI.art.morrowindLight,
-            textShadow = true,
-            textShadowColor = OTKUI.art.colorBlack,
-            textSize = OTKUI.constants.TOOLTIP_TEXT_SIZE,
-            multiline = true,
-            --wordWrap = true,
-        }
-    }
-    OTKUI.elems.tooltip.hostWidget.layout.content:add(OTKUI.elems.tooltip.tooltipText)
-end
-
--- Creates the floating tooltip box used by subpage help.
----@return nil
-local function registerTooltip()
-    OTKUI.elems.tooltip.hostWidget = ui.create {
-        name = 'textTooltipWidget',
-        type = ui.TYPE.Container,
-        template = MWUI.templates.boxTransparent,
-        layer = 'Popup',
-        props = {
-            position = v2(0, 0),
-            --relativePosition = v2(0.5, 0.5),
-            visible = false,
-        },
-        content = ui.content {},
-        events = {},
-    }
-
-    registerTextTooltip()
-end
-
--- Adds line breaks to tooltip text so it does not become one long line.
----@param text string Tooltip text to wrap
----@param maxCharsPerLine number Preferred maximum characters per line
----@return string wrappedText Text with newline breaks inserted
-local function wrapTooltipText(text, maxCharsPerLine)
-    if type(text) ~= 'string' then return '' end
-    if type(maxCharsPerLine) ~= 'number' or maxCharsPerLine <= 0 then return text end
-
-    local wrappedLines = {}
-
-    for sourceLine in (text .. '\n'):gmatch('(.-)\n') do
-        local currentLine = ''
-
-        for word in sourceLine:gmatch('%S+') do
-            if currentLine == '' then
-                currentLine = word
-            elseif #currentLine + 1 + #word <= maxCharsPerLine then
-                currentLine = currentLine .. ' ' .. word
-            else
-                wrappedLines[#wrappedLines + 1] = currentLine
-                currentLine = word
-            end
-        end
-
-        wrappedLines[#wrappedLines + 1] = currentLine
-    end
-
-    return table.concat(wrappedLines, '\n')
-end
-
--- Moves the tooltip near the mouse and fills it with the current help text.
----@param text string Tooltip text to show
----@param mousePosition any util.vector2 current mouse position
----@return nil
-local function updateTextTooltip(text, mousePosition)
-    OTKUI.elems.tooltip.tooltipText.layout.props.text = wrapTooltipText(text, OTKUI.constants.TOOLTIP_MAX_CHARS_PER_LINE)
-    OTKUI.elems.tooltip.tooltipText:update()
-
-    OTKUI.elems.tooltip.hostWidget.layout.props.position = mousePosition + v2(16, 16)
-    OTKUI.elems.tooltip.hostWidget.layout.props.visible = true
-    OTKUI.elems.tooltip.hostWidget:update()
-end
-
--- Hides the tooltip and clears its old text.
----@return nil
-local function clearTextTooltip()
-    OTKUI.elems.tooltip.tooltipText.layout.props.text = ''
-    OTKUI.elems.tooltip.tooltipText:update()
-
-    OTKUI.elems.tooltip.hostWidget.layout.props.position = v2(0, 0)
-    OTKUI.elems.tooltip.hostWidget.layout.props.visible = false
-    OTKUI.elems.tooltip.hostWidget:update()
-end
-
 -- Shows the help-scroll button only when the selected subpage has tooltip text.
 ---@return nil
 updateSubPageHelpButtonVisibility = function()
@@ -1606,12 +1597,11 @@ updateSubPageHelpButtonVisibility = function()
     local tooltip = currentSubPage and currentSubPage.tooltip
     local hasTooltip = type(tooltip) == 'string' and tooltip ~= ''
 
-    OTKUI.elems.tooltip.currentTooltip = hasTooltip and tooltip or nil
     OTKUI.elems.subpageHelpButton.layout.props.visible = hasTooltip
     OTKUI.elems.subpageHelpButton:update()
 
-    if not hasTooltip and OTKUI.elems.tooltip.hostWidget then
-        clearTextTooltip()
+    if not hasTooltip then
+        tooltipHandler.clear()
     end
 end
 
@@ -2005,24 +1995,24 @@ local function buildMenu()
         events = {},
     }
 
+    local function setPageListScrollTarget()
+        setScrollTarget(pageListFlex, pageListHostWidget, getPageListSize())
+    end
+
     -- pageListWidget events are declared after pageListFlex so we can reference it
     pageListWidget.layout.events = {
         focusGain = async:callback(function ()
-            if scrollableWindow == nil then
-                onFrameFunctions['pageList_focusGain'] = function ()
-                    setScrollTarget(pageListFlex, pageListHostWidget, getPageListSize())
-                end
+            onFrameFunctions['pageList_focusGain'] = function ()
+                setPageListScrollTarget()
             end
-        end)
+        end),
     }
 
     -- Catches our mouse between page buttons
     pageListFlex.layout.events = {
         focusGain = async:callback(function ()
-            if scrollableWindow == nil then
-                onFrameFunctions['pageList_focusGain'] = function ()
-                    setScrollTarget(pageListFlex, pageListHostWidget, getPageListSize())
-                end
+            onFrameFunctions['pageList_focusGain'] = function ()
+                setPageListScrollTarget()
             end
         end),
     }
@@ -2109,7 +2099,7 @@ local function buildMenu()
 
     subpageListHostWidget.layout.events = {
         focusGain = async:callback(function ()
-            if scrollableWindow == nil and OTKUI.elems.currentPage and OTKUI.elems.currentPage.subPageListFlex then
+            if OTKUI.elems.currentPage and OTKUI.elems.currentPage.subPageListFlex then
                 onFrameFunctions['subPageListHost_focusGain'] = function ()
                     setScrollTarget(
                         OTKUI.elems.currentPage.subPageListFlex,
@@ -2205,7 +2195,7 @@ local function buildMenu()
         events = {},
     }
 
-    registerTooltip()
+    tooltipHandler.register()
 
     OTKUI.elems.subpageHelpButton.layout.events = {
         focusGain = async:callback(function ()
@@ -2218,7 +2208,7 @@ local function buildMenu()
             onFrameFunctions['subpageHelp_focusLoss'] = function ()
                 OTKUI.elems.subpageHelpButton.layout.props.resource = getTexture('textures/nibby/tx_scroll_01_outline.dds')
                 OTKUI.elems.subpageHelpButton:update()
-                clearTextTooltip()
+                tooltipHandler.clear()
             end
         end),
         mouseMove = async:callback(function (event)
@@ -2227,9 +2217,9 @@ local function buildMenu()
                 local currentSubPage = OTKUI.elems.currentSubPage
                 local tooltip = currentSubPage and currentSubPage.tooltip
                 if type(tooltip) == 'string' and tooltip ~= '' then
-                    updateTextTooltip(tooltip, mousePosition)
+                    tooltipHandler.showText(tooltip, mousePosition)
                 else
-                    clearTextTooltip()
+                    tooltipHandler.clear()
                 end
             end
         end),
@@ -2295,12 +2285,19 @@ end
 ---@param dt number Time since last frame
 ---@return nil
 local function onFrame(dt)
-    if not isRootVisible() then return end
+    if not isRootVisible() then
+        clearOnFrameFunctions()
+        return
+    end
 
     for key, func in pairs(onFrameFunctions) do
         onFrameFunctions[key] = nil
         if func then
             func(dt)
+            if not isRootVisible() then
+                clearOnFrameFunctions()
+                return
+            end
         end
     end
 end
@@ -2310,7 +2307,7 @@ end
 ---@param horizontal number Horizontal wheel delta
 ---@return nil
 local function onMouseWheel(vertical, horizontal)
-    if not isRootVisible() or not scrollableWindow then return end -- Only in our UI; only in a scrollable window
+    if not isRootVisible() or not currentScrollElem then return end -- Only in our UI; only after hovering a scrollable window
 
     local direction = vertical -- prefer vertical
     if direction == 0 then

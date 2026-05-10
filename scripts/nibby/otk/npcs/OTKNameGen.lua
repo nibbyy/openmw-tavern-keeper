@@ -218,40 +218,137 @@ local nameList = {
     },
 }
 
--- Kept as a simple accessor for any caller that already expected registerNames().
----@return OTKNameList nameData Name data indexed by race name, such as nameData['High Elf'].
-local function registerNames()
-    return nameList
+-- Picks one string from a simple list
+---@param names string[]|nil
+---@param label string Human-readable source used in error logs.
+---@return string|nil name
+local function selectRandomName(names, label)
+    if type(names) ~= 'table' or #names == 0 then
+        print('[OTK - ERR] OTKNameGen.selectRandomName found no names for ' .. label)
+        return nil
+    end
+
+    return names[math.random(1, #names)]
 end
 
+-- Turns the boolean used by the NPC spawner into the table key used by nameList.
+---@param isMale boolean
+---@return OTKNameGender gender
+local function getNameGender(isMale)
+    return isMale and 'male' or 'female'
+end
+
+-- High elves only use a single personal name in this table, so there is no surname step.
+---@param isMale boolean
+---@return string|nil name
 local function highelfName(isMale)
+    local gender = getNameGender(isMale)
     local raceNames = nameList['High Elf'].name
-    local names = isMale and raceNames.male or raceNames.female
-    return names[#names]
-end
 
-local function argonianName(isMale)
+    return selectRandomName(raceNames[gender], 'High Elf ' .. gender)
 end
 
 local function woodelfName(isMale)
-end
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Wood Elf'].name
 
-local function bretonName(isMale)
-end
-
-local function darkelfName(isMale)
-end
-
-local function imperialName(isMale)
-end
-
-local function khajiitName(isMale)
+    return selectRandomName(raceNames[gender], 'Wood Elf ' .. gender)
 end
 
 local function nordName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Nord'].name
+
+    return selectRandomName(raceNames[gender], 'Nord ' .. gender)
 end
 
 local function redguardName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Redguard'].name
+
+    return selectRandomName(raceNames[gender], 'Redguard ' .. gender)
+end
+
+local function khajiitName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Khajiit'].name
+
+    return selectRandomName(raceNames[gender], 'Khajiit ' .. gender)
+end
+
+---@param isMale boolean
+---@return string|nil name
+local function bretonName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Breton']
+    local firstName = selectRandomName(raceNames.first_name[gender], 'Breton ' .. gender .. ' first name')
+    local surname = selectRandomName(raceNames.surname, 'Breton surname')
+
+    if not firstName or not surname then
+        return nil
+    end
+
+    return firstName .. ' ' .. surname
+end
+
+local function orcName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Orc']
+    local firstName = selectRandomName(raceNames.first_name[gender], 'Orc ' .. gender .. ' first name')
+    local surname = selectRandomName(raceNames.surname, 'Orc surname')
+
+    if not firstName or not surname then
+        return nil
+    end
+
+    return firstName .. ' ' .. surname
+end
+
+---@param isMale boolean
+---@return string|nil name
+local function argonianName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Argonian'].name
+    local nameStyle = math.random(1, 2) == 1 and 'jel' or 'imp'
+
+    return selectRandomName(raceNames[gender][nameStyle], 'Argonian ' .. gender .. ' ' .. nameStyle)
+end
+
+---@param isMale boolean
+---@return string|nil name
+local function darkelfName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Dark Elf']
+    local nameStyle = math.random(1, 2) == 1 and 'settler' or 'ashlander'
+    local styleNames = raceNames[nameStyle]
+    local firstName = selectRandomName(styleNames.first_name[gender], 'Dark Elf ' .. nameStyle .. ' ' .. gender .. ' first name')
+    local surname = selectRandomName(styleNames.surname, 'Dark Elf ' .. nameStyle .. ' surname')
+
+    if not firstName or not surname then
+        return nil
+    end
+
+    return firstName .. ' ' .. surname
+end
+
+---@param isMale boolean
+---@return string|nil name
+local function imperialName(isMale)
+    local gender = getNameGender(isMale)
+    local raceNames = nameList['Imperial']
+    local firstName = selectRandomName(raceNames.first_name[gender], 'Imperial ' .. gender .. ' first name')
+    local surnameStyle = math.random(1, 2) == 1 and 'unisex' or 'root'
+    local surname = selectRandomName(raceNames.surname[surnameStyle], 'Imperial ' .. surnameStyle .. ' surname')
+
+    if not firstName or not surname then
+        return nil
+    end
+
+    if surnameStyle == 'root' then
+        surname = surname .. (isMale and 'us' or 'a')
+    end
+
+    return firstName .. ' ' .. surname
 end
 
 local function selectName(race, isMale)
@@ -275,6 +372,8 @@ local function selectName(race, isMale)
         selectedName = khajiitName(isMale)
     elseif race == 'Nord' then
         selectedName = nordName(isMale)
+    elseif race == 'Orc' then
+        selectedName = orcName(isMale)
     elseif race == 'Redguard' then
         selectedName = redguardName(isMale)
     else
@@ -291,7 +390,6 @@ return {
         version = 1,
         nameList = nameList,
         names = nameList,
-        registerNames = registerNames,
         selectName = selectName,
     },
 }

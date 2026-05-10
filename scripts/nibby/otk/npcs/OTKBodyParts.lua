@@ -1,3 +1,5 @@
+local vfs = require('openmw.vfs')
+
 ---@alias OTKGender 'female'|'male'
 ---@alias OTKNpcPartType 'hair'|'head'
 
@@ -458,7 +460,109 @@ local function normalizeKey(value)
     return key
 end
 
--- Picks one matching head or hair BODY record id.
+---@return OTKRacePartRecords
+local function emptyRaceParts()
+    return {
+        male = {
+            heads = {},
+            hairs = {},
+        },
+        female = {
+            heads = {},
+            hairs = {},
+        },
+    }
+end
+
+---@type table<string, OTKRacePartRecords>
+local MODDED_PART_RECORDS = {}
+
+---@type string[]
+local MODDED_PART_RACES = {
+    'argonian',
+    'breton',
+    'dark_elf',
+    'high_elf',
+    'imperial',
+    'khajiit',
+    'nord',
+    'orc',
+    'redguard',
+    'wood_elf',
+}
+
+-- Clears any previously discovered modded body parts.
+---@return table<string, OTKRacePartRecords> moddedPartRecords Empty modded body-part records.
+local function clearModdedNpcParts()
+    for raceKey in pairs(MODDED_PART_RECORDS) do
+        MODDED_PART_RECORDS[raceKey] = nil
+    end
+
+    return MODDED_PART_RECORDS
+end
+
+-- Adds empty race buckets to the modded body-part records table.
+local function addModdedPartRaceList()
+    for _, raceKey in ipairs(MODDED_PART_RACES) do
+        MODDED_PART_RECORDS[raceKey] = emptyRaceParts()
+    end
+end
+
+-- Checks whether a BODY record id is already in a bucket.
+---@param bucket string[]
+---@param recordId string
+---@return boolean exists
+local function hasPartRecord(bucket, recordId)
+    local normalizedRecordId = string.lower(recordId)
+
+    for _, existingRecordId in ipairs(bucket) do
+        if string.lower(existingRecordId) == normalizedRecordId then
+            return true
+        end
+    end
+
+    return false
+end
+
+-- Scans meshes for likely mod-added NPC heads and hair
+---@return table<string, OTKRacePartRecords> moddedPartRecords Newly discovered BODY record ids.
+local function scanModdedNpcParts()
+    clearModdedNpcParts()
+    addModdedPartRaceList()
+
+    for fileName in vfs.pathsWithPrefix('meshes/b/') do
+        local recordId = tostring(fileName):gsub('\\', '/'):match('([^/]+)%.[Nn][Ii][Ff]$')
+        local lowerRecordId = recordId and string.lower(recordId) or nil
+
+        if lowerRecordId then
+            for raceKey, moddedRaceParts in pairs(MODDED_PART_RECORDS) do
+                local racePattern = raceKey:gsub('_', '[ _]')
+                local genderCode, partType = lowerRecordId:match('^b_n_' .. racePattern .. '_([mf])_(head)_')
+
+                if not genderCode then
+                    genderCode, partType = lowerRecordId:match('^b_n_' .. racePattern .. '_([mf])_(hair)_')
+                end
+
+                if genderCode then
+                    local gender = genderCode == 'm' and 'male' or 'female'
+                    local bucketName = partType .. 's'
+                    local vanillaBucket = NPC_PART_RECORDS[raceKey][gender][bucketName]
+                    local moddedBucket = moddedRaceParts[gender][bucketName]
+
+                    if not hasPartRecord(vanillaBucket, recordId) and not hasPartRecord(moddedBucket, recordId) then
+                        table.insert(moddedBucket, recordId)
+                    end
+
+                    break
+                end
+            end
+        end
+    end
+
+    return MODDED_PART_RECORDS
+end
+
+-- Picks one matching head or hair BODY record id
 ---@param raceId string
 ---@param isMale boolean
 ---@param partType OTKNpcPartType
@@ -482,6 +586,8 @@ return {
     interface = {
         version = 1,
         bodyParts = NPC_PART_RECORDS,
+        clearModdedNpcParts = clearModdedNpcParts,
+        scanModdedNpcParts = scanModdedNpcParts,
         selectNpcPart = selectNpcPart,
     },
 }
